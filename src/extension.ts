@@ -18,7 +18,12 @@ export function activate(context: vscode.ExtensionContext) {
 
     // 執行 pyflowchart
     const cmd = `python -m pyflowchart "${pyFile}"`;
-    exec(cmd, (err, stdout, stderr) => {
+
+    // 原本：
+    // exec(cmd, (err, stdout, stderr) => {
+    
+    // 修改後：
+    exec(cmd, { env: { ...process.env, PYTHONIOENCODING: 'utf-8' } }, (err, stdout, stderr) => {
       if (err) {
         vscode.window.showErrorMessage(`pyflowchart 失敗：${stderr || err.message}`);
         return;
