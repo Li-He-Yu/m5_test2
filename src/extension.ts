@@ -17,7 +17,12 @@ export function activate(context: vscode.ExtensionContext) {
     }
 
     // 執行 pyflowchart
-    const cmd = `python -m pyflowchart "${pyFile}"`;
+    // const cmd = `python -m pyflowchart "${pyFile}"`;
+
+    // 執行修改過後的 "my_pyflowchart"
+    const pyflowchartPath = path.join(context.extensionPath, 'my_pyflowchart', 'pyflowchart', '__main__.py');
+    const cmd = `python "${pyflowchartPath}" "${pyFile}"`;
+
 
     // 原本：
     // exec(cmd, (err, stdout, stderr) => {
