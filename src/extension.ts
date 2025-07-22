@@ -2,24 +2,8 @@ import * as vscode from 'vscode';
 import { exec } from 'child_process';
 import * as path from 'path';
 
-//VSCode 載入擴展時會自動調用這個函數，雖然也不知道為甚麼這個一定要放前面:0
-
 export function activate(context: vscode.ExtensionContext) {
-
-    //註冊在package.json所定義的命令
-    //package.json所定義的註解我打在這邊，因為package.json不能打註解，會報錯，我也不知道為甚麼 爛設計:3
-
-    // 1.右鍵點擊 Python 檔案 (只有在python檔案右擊滑鼠的時候，下拉式選單才有Generate Flowchart的選項)
-    // 2.選擇 "Generate Flowchart"
-    // 3.VSCode 調用這個函數
-    
-
   const disposable = vscode.commands.registerCommand('m5-test2.generate', async (uri?: vscode.Uri) => {
-
-    //uri? 是可以選擇的參數，包含使用者選擇檔案的路徑
-
-    //這邊做的是驗證檔案是否真的為python檔案
-
     const target = uri ?? vscode.window.activeTextEditor?.document.uri;
     if (!target) {
       vscode.window.showWarningMessage('找不到檔案');
@@ -32,11 +16,8 @@ export function activate(context: vscode.ExtensionContext) {
       return;
     }
 
-    //執行 pyflowchart 以及報錯的部分
-    
+    // 執行 pyflowchart
     const cmd = `python -m pyflowchart "${pyFile}"`;
-    
-    
     exec(cmd, (err, stdout, stderr) => {
       if (err) {
         vscode.window.showErrorMessage(`pyflowchart 失敗：${stderr || err.message}`);
@@ -53,14 +34,14 @@ export function activate(context: vscode.ExtensionContext) {
       const panel = vscode.window.createWebviewPanel(
         'flowchartPreview',
         `Flowchart - ${path.basename(pyFile)}`,
-        vscode.ViewColumn.Beside,                   //這個 .Beside代表會在右側顯示
+        vscode.ViewColumn.Beside,
         { 
-          enableScripts: true,                      
+          enableScripts: true,
           localResourceRoots: [vscode.Uri.file(path.join(context.extensionPath, 'media'))]
         }
       );
 
-      // 取得raphael.min.js和flowchart.min.js下載到我電腦的檔案路徑
+      // 取得本地檔案路徑
       const mediaPath = path.join(context.extensionPath, 'media');
       const raphaelPath = path.join(mediaPath, 'raphael.min.js');
       const flowchartPath = path.join(mediaPath, 'flowchart.min.js');
@@ -69,19 +50,18 @@ export function activate(context: vscode.ExtensionContext) {
       const flowchartUri = panel.webview.asWebviewUri(vscode.Uri.file(flowchartPath));
 
       // 設定 Webview 內容
-      panel.webview.html = getFullFlowchartHTML(code, panel.webview.cspSource, raphaelUri, flowchartUri);
+      panel.webview.html = getZoomableFlowchartHTML(code, panel.webview.cspSource, raphaelUri, flowchartUri);
     });
   });
 
   context.subscriptions.push(disposable);
 }
 
-function getFullFlowchartHTML(flowchartCode: string, cspSource: string, raphaelUri: vscode.Uri, flowchartUri: vscode.Uri): string {
+function getZoomableFlowchartHTML(flowchartCode: string, cspSource: string, raphaelUri: vscode.Uri, flowchartUri: vscode.Uri): string {
   const escapedCode = flowchartCode
     .replace(/\\/g, '\\\\')
     .replace(/`/g, '\\`')
     .replace(/\$/g, '\\$');
-
 
   return `<!DOCTYPE html>
 <html>
@@ -95,6 +75,7 @@ function getFullFlowchartHTML(flowchartCode: string, cspSource: string, raphaelU
             margin: 20px; 
             background: white;
             color: #333;
+            overflow: hidden; /* 防止頁面滾動條 */
         }
         .header h2 {
             margin: 0 0 20px 0;
@@ -102,27 +83,84 @@ function getFullFlowchartHTML(flowchartCode: string, cspSource: string, raphaelU
         }
         .controls {
             margin-bottom: 20px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex-wrap: wrap;
         }
         .button {
             background: #007acc;
             color: white;
             border: none;
             padding: 8px 16px;
-            margin-right: 10px;
             border-radius: 4px;
             cursor: pointer;
             font-size: 14px;
+            transition: background 0.2s;
         }
         .button:hover {
             background: #005a9e;
         }
-        #canvas { 
+        .button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        
+        /* 縮放控制器樣式 */
+        .zoom-controls {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            background: #f0f0f0;
+            padding: 5px 10px;
+            border-radius: 6px;
+            border: 1px solid #ddd;
+        }
+        .zoom-btn {
+            background: #fff;
+            border: 1px solid #ccc;
+            width: 30px;
+            height: 30px;
+            border-radius: 4px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            color: #333;
+            transition: all 0.2s;
+        }
+        .zoom-btn:hover {
+            background: #e6f3ff;
+            border-color: #007acc;
+        }
+        .zoom-info {
+            font-size: 12px;
+            color: #666;
+            min-width: 45px;
+            text-align: center;
+        }
+        
+        /* 流程圖容器樣式 */
+        #canvas-container { 
             border: 1px solid #ccc; 
-            padding: 20px; 
-            min-height: 400px;
             background: white;
             overflow: auto;
+            position: relative;
+            height: calc(100vh - 200px); /* 動態高度 */
         }
+        
+        #canvas {
+            transform-origin: 0 0;
+            transition: transform 0.2s ease;
+            min-width: 100%;
+            min-height: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            position: relative;
+        }
+        
         .error { 
             color: #d63384; 
             background: #f8d7da; 
@@ -155,10 +193,36 @@ function getFullFlowchartHTML(flowchartCode: string, cspSource: string, raphaelU
             margin-bottom: 15px;
             font-size: 14px;
         }
+        
         /* 確保 SVG 在容器中正確顯示 */
         #canvas svg {
-            max-width: 100%;
-            height: auto;
+            max-width: none !important;
+            height: auto !important;
+        }
+        
+        /* 迷你地圖樣式 */
+        .minimap {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            width: 150px;
+            height: 100px;
+            background: rgba(255, 255, 255, 0.9);
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            z-index: 100;
+            overflow: hidden;
+            display: none;
+        }
+        .minimap-content {
+            transform-origin: 0 0;
+            transform: scale(0.1);
+        }
+        .minimap-viewport {
+            position: absolute;
+            border: 2px solid #007acc;
+            background: rgba(0, 122, 204, 0.1);
+            pointer-events: none;
         }
     </style>
 </head>
@@ -168,29 +232,50 @@ function getFullFlowchartHTML(flowchartCode: string, cspSource: string, raphaelU
     </div>
     
     <div id="status" class="status">
-         正在載入 flowchart.js...
+        🔄 正在載入 flowchart.js...
     </div>
     
     <div class="controls">
         <button class="button" onclick="toggleCode()">顯示/隱藏原始碼</button>
         <button class="button" onclick="downloadSVG()" id="downloadBtn" style="display: none;">下載 SVG</button>
+        
+        <!-- 縮放控制器 -->
+        <div class="zoom-controls">
+            <div class="zoom-btn" onclick="zoomOut()" title="縮小">−</div>
+            <div class="zoom-info" id="zoomLevel">100%</div>
+            <div class="zoom-btn" onclick="zoomIn()" title="放大">+</div>
+            <div class="zoom-btn" onclick="resetZoom()" title="重設縮放">⌂</div>
+            <div class="zoom-btn" onclick="fitToWindow()" title="適應視窗">⊞</div>
+        </div>
+        
+        <button class="button" onclick="toggleMinimap()" id="minimapToggle" style="display: none;">迷你地圖</button>
     </div>
     
-    <div id="canvas">
-        <div class="loading">正在載入流程圖...</div>
+    <div id="canvas-container">
+        <div id="canvas">
+            <div class="loading">正在載入流程圖...</div>
+        </div>
+        
+        <!-- 迷你地圖 -->
+        <div class="minimap" id="minimap">
+            <div class="minimap-content" id="minimap-content"></div>
+            <div class="minimap-viewport" id="minimap-viewport"></div>
+        </div>
     </div>
     
     <div id="code-display" class="code-display">${escapedCode}</div>
     
     <!-- 載入順序很重要：先 Raphael，再 flowchart -->
-
-    <!-- load rahael.js 和 flowchart.js -->
-
     <script src="${raphaelUri}"></script>
     <script src="${flowchartUri}"></script>
     <script>
         let initAttempts = 0;
         const maxAttempts = 50;
+        let currentZoom = 1;
+        let isDragging = false;
+        let dragStart = { x: 0, y: 0 };
+        let canvasPosition = { x: 0, y: 0 };
+        let minimapVisible = false;
         
         function updateStatus(message, isError = false) {
             const statusEl = document.getElementById('status');
@@ -207,17 +292,17 @@ function getFullFlowchartHTML(flowchartCode: string, cspSource: string, raphaelU
             console.log('flowchart 類型:', typeof flowchart);
             
             if (typeof Raphael !== 'undefined' && typeof flowchart !== 'undefined') {
-                console.log(' Raphael 和 flowchart 都已載入');
-                updateStatus(' 庫載入成功，正在渲染流程圖...');
-                setTimeout(initChart, 100); // 稍微延遲確保完全載入
+                console.log('✅ Raphael 和 flowchart 都已載入');
+                updateStatus('✅ 庫載入成功，正在渲染流程圖...');
+                setTimeout(initChart, 100);
             } else if (initAttempts < maxAttempts) {
                 let missing = [];
                 if (typeof Raphael === 'undefined') missing.push('Raphael.js');
                 if (typeof flowchart === 'undefined') missing.push('flowchart.js');
-                updateStatus(\` 等待載入: \${missing.join(', ')}...\`);
+                updateStatus(\`⏳ 等待載入: \${missing.join(', ')}...\`);
                 setTimeout(waitForLibraries, 100);
             } else {
-                let errorMsg = ' 載入超時：';
+                let errorMsg = '❌ 載入超時：';
                 if (typeof Raphael === 'undefined') errorMsg += ' Raphael.js 未載入';
                 if (typeof flowchart === 'undefined') errorMsg += ' flowchart.js 未載入';
                 updateStatus(errorMsg, true);
@@ -226,21 +311,19 @@ function getFullFlowchartHTML(flowchartCode: string, cspSource: string, raphaelU
             }
         }
         
-    <!-- 將 flowchart.js 轉換成 flowchart -->
-
         function initChart() {
             try {
                 const code = \`${escapedCode}\`;
                 console.log('開始解析流程圖代碼:', code);
                 
                 if (!code.trim()) {
-                    updateStatus(' 沒有可用的流程圖代碼', true);
+                    updateStatus('❌ 沒有可用的流程圖代碼', true);
                     document.getElementById('canvas').innerHTML = 
                         '<div class="error">沒有可用的流程圖代碼</div>';
                     return;
                 }
                 
-                updateStatus(' 正在解析流程圖...');
+                updateStatus('🔧 正在解析流程圖...');
                 
                 // 清空容器
                 document.getElementById('canvas').innerHTML = '';
@@ -248,9 +331,9 @@ function getFullFlowchartHTML(flowchartCode: string, cspSource: string, raphaelU
                 // 解析並渲染流程圖
                 console.log('解析流程圖...');
                 const diagram = flowchart.parse(code);
-                console.log(' 流程圖解析成功:', diagram);
+                console.log('✅ 流程圖解析成功:', diagram);
                 
-                updateStatus(' 正在渲染 SVG...');
+                updateStatus('🎨 正在渲染 SVG...');
                 
                 // 渲染到 canvas
                 diagram.drawSVG('canvas', {
@@ -268,11 +351,18 @@ function getFullFlowchartHTML(flowchartCode: string, cspSource: string, raphaelU
                     'scale': 1
                 });
                 
-                console.log(' 流程圖渲染完成');
-                updateStatus(' 流程圖已成功生成！');
+                console.log('✅ 流程圖渲染完成');
+                updateStatus('✅ 流程圖已成功生成！');
                 
-                // 顯示下載按鈕
+                // 顯示功能按鈕
                 document.getElementById('downloadBtn').style.display = 'inline-block';
+                document.getElementById('minimapToggle').style.display = 'inline-block';
+                
+                // 初始化縮放和拖動功能
+                initZoomAndPan();
+                
+                // 確保初始位置正確
+                resetZoom();
                 
                 // 3秒後隱藏狀態訊息
                 setTimeout(() => {
@@ -280,11 +370,239 @@ function getFullFlowchartHTML(flowchartCode: string, cspSource: string, raphaelU
                 }, 3000);
                 
             } catch (error) {
-                console.error(' 渲染錯誤:', error);
+                console.error('❌ 渲染錯誤:', error);
                 console.error('錯誤堆疊:', error.stack);
-                updateStatus(' 渲染失敗: ' + error.message, true);
+                updateStatus('❌ 渲染失敗: ' + error.message, true);
                 document.getElementById('canvas').innerHTML = 
                     '<div class="error">渲染失敗: ' + error.message + '<br><br>詳細錯誤請查看 Console (F12)</div>';
+            }
+        }
+        
+        // 縮放功能
+        function zoomIn() {
+            currentZoom = Math.min(currentZoom * 1.2, 5); // 最大 500%
+            updateZoom();
+        }
+        
+        function zoomOut() {
+            currentZoom = Math.max(currentZoom / 1.2, 0.1); // 最小 10%
+            updateZoom();
+        }
+        
+        function resetZoom() {
+            currentZoom = 1;
+            canvasPosition = { x: 0, y: 0 };
+            originalSvgWidth = 0;  // 重設原始尺寸，讓下次重新測量
+            originalSvgHeight = 0;
+            updateZoom();
+        }
+        
+        function fitToWindow() {
+            const container = document.getElementById('canvas-container');
+            const canvas = document.getElementById('canvas');
+            const svg = canvas.querySelector('svg');
+            
+            if (!svg) return;
+            
+            const containerRect = container.getBoundingClientRect();
+            const svgRect = svg.getBoundingClientRect();
+            
+            const scaleX = (containerRect.width - 40) / svgRect.width;
+            const scaleY = (containerRect.height - 40) / svgRect.height;
+            
+            currentZoom = Math.min(scaleX, scaleY, 1); // 不超過 100%
+            canvasPosition = { x: 0, y: 0 };
+            updateZoom();
+        }
+        
+        let originalSvgWidth = 0;
+        let originalSvgHeight = 0;
+        
+        function updateZoom() {
+            const canvas = document.getElementById('canvas');
+            const container = document.getElementById('canvas-container');
+            const svg = canvas.querySelector('svg');
+            
+            if (svg) {
+                // 第一次獲取原始尺寸
+                if (originalSvgWidth === 0) {
+                    // 暫時移除所有變換來獲取真實尺寸
+                    const originalTransform = canvas.style.transform;
+                    canvas.style.transform = 'none';
+                    
+                    const svgRect = svg.getBoundingClientRect();
+                    originalSvgWidth = svgRect.width;
+                    originalSvgHeight = svgRect.height;
+                    
+                    // 恢復變換
+                    canvas.style.transform = originalTransform;
+                }
+                
+                const containerRect = container.getBoundingClientRect();
+                
+                // 計算縮放後的實際尺寸
+                const scaledWidth = originalSvgWidth * currentZoom;
+                const scaledHeight = originalSvgHeight * currentZoom;
+                
+                // 重新計算邊界：確保能看到圖片的所有部分
+                let maxX = 0, maxY = 0;
+                
+                if (scaledWidth > containerRect.width) {
+                    // 水平方向：允許移動距離 = (圖片寬度 - 容器寬度) / 2 / 縮放比例
+                    maxX = (scaledWidth - containerRect.width) / 2 / currentZoom;
+                }
+                
+                if (scaledHeight > containerRect.height) {
+                    // 垂直方向：允許移動距離 = (圖片高度 - 容器高度) / 2 / 縮放比例
+                    maxY = (scaledHeight - containerRect.height) / 2 / currentZoom;
+                }
+                
+                // 應用邊界限制，但給一點寬容度
+                const tolerance = 10; // 10px 的寬容度
+                canvasPosition.x = Math.max(-(maxX + tolerance), Math.min(maxX + tolerance, canvasPosition.x));
+                canvasPosition.y = Math.max(-(maxY + tolerance), Math.min(maxY + tolerance, canvasPosition.y));
+                
+                // 如果圖片小於容器，居中顯示
+                if (scaledWidth <= containerRect.width) {
+                    canvasPosition.x = 0;
+                }
+                if (scaledHeight <= containerRect.height) {
+                    canvasPosition.y = 0;
+                }
+            }
+            
+            canvas.style.transform = \`scale(\${currentZoom}) translate(\${canvasPosition.x}px, \${canvasPosition.y}px)\`;
+            
+            // 更新縮放顯示
+            document.getElementById('zoomLevel').textContent = Math.round(currentZoom * 100) + '%';
+            
+            // 更新迷你地圖
+            updateMinimap();
+        }
+        
+        // 拖動功能
+        function initZoomAndPan() {
+            const container = document.getElementById('canvas-container');
+            
+            // 滑鼠拖動
+            container.addEventListener('mousedown', startDrag);
+            document.addEventListener('mousemove', drag);
+            document.addEventListener('mouseup', endDrag);
+            
+            // 滾輪上下移動 (不縮放)
+            container.addEventListener('wheel', (e) => {
+                e.preventDefault();
+                
+                // 滾輪控制上下移動
+                const scrollSpeed = 30;
+                
+                // 簡單直接的移動
+                if (e.deltaY > 0) {
+                    canvasPosition.y -= scrollSpeed; // 向下滾動，圖片向上移動
+                } else {
+                    canvasPosition.y += scrollSpeed; // 向上滾動，圖片向下移動
+                }
+                
+                // 更新顯示
+                updateZoom();
+            });
+            
+            // 鍵盤快捷鍵
+            document.addEventListener('keydown', (e) => {
+                if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+                
+                const moveSpeed = 20; // 方向鍵移動速度
+                
+                switch(e.key) {
+                    case '+':
+                    case '=':
+                        e.preventDefault();
+                        zoomIn();
+                        break;
+                    case '-':
+                        e.preventDefault();
+                        zoomOut();
+                        break;
+                    case '0':
+                        if (e.ctrlKey || e.metaKey) {
+                            e.preventDefault();
+                            resetZoom();
+                        }
+                        break;
+                    case 'ArrowUp':
+                        e.preventDefault();
+                        canvasPosition.y += moveSpeed;
+                        updateZoom(); // 內部會限制邊界
+                        break;
+                    case 'ArrowDown':
+                        e.preventDefault();
+                        canvasPosition.y -= moveSpeed;
+                        updateZoom(); // 內部會限制邊界
+                        break;
+                    case 'ArrowLeft':
+                        e.preventDefault();
+                        canvasPosition.x += moveSpeed;
+                        updateZoom(); // 內部會限制邊界
+                        break;
+                    case 'ArrowRight':
+                        e.preventDefault();
+                        canvasPosition.x -= moveSpeed;
+                        updateZoom(); // 內部會限制邊界
+                        break;
+                }
+            });
+        }
+        
+        function startDrag(e) {
+            if (e.button === 0) { // 左鍵
+                isDragging = true;
+                dragStart = { x: e.clientX - canvasPosition.x, y: e.clientY - canvasPosition.y };
+                e.preventDefault();
+            }
+        }
+        
+        function drag(e) {
+            if (isDragging) {
+                const newX = e.clientX - dragStart.x;
+                const newY = e.clientY - dragStart.y;
+                
+                canvasPosition.x = newX;
+                canvasPosition.y = newY;
+                
+                updateZoom(); // 內部會限制邊界
+                e.preventDefault();
+            }
+        }
+        
+        function endDrag() {
+            isDragging = false;
+        }
+        
+        // 迷你地圖功能
+        function toggleMinimap() {
+            minimapVisible = !minimapVisible;
+            const minimap = document.getElementById('minimap');
+            minimap.style.display = minimapVisible ? 'block' : 'none';
+            updateMinimap();
+        }
+        
+        function updateMinimap() {
+            if (!minimapVisible) return;
+            
+            const canvas = document.getElementById('canvas');
+            const svg = canvas.querySelector('svg');
+            const minimapContent = document.getElementById('minimap-content');
+            
+            if (svg && minimapContent) {
+                // 複製 SVG 到迷你地圖
+                minimapContent.innerHTML = svg.outerHTML;
+                
+                // 更新迷你地圖中的 SVG 縮放
+                const minimapSvg = minimapContent.querySelector('svg');
+                if (minimapSvg) {
+                    minimapSvg.style.maxWidth = 'none';
+                    minimapSvg.style.height = 'auto';
+                }
             }
         }
         
@@ -318,8 +636,8 @@ function getFullFlowchartHTML(flowchartCode: string, cspSource: string, raphaelU
         }
         
         // 開始載入檢測
-        console.log(' 開始等待庫載入...');
-        updateStatus(' 正在載入必要的庫...');
+        console.log('🚀 開始等待庫載入...');
+        updateStatus('🔄 正在載入必要的庫...');
         waitForLibraries();
     </script>
 </body>
