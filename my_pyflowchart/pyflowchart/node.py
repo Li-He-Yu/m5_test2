@@ -70,7 +70,7 @@ class Node(object):
             params = f'({params})'
 
         # give it a line number
-        line_info = f"[{self.lineno}] " if self.lineno else ""
+        line_info = f"line {self.lineno}: " if self.lineno else ""
 
         # return f'{self.node_name}{params}=>{self.node_type}: {self.node_text}\n'
         return f'{self.node_name}{params}=>{self.node_type}: {line_info}{self.node_text}\n'

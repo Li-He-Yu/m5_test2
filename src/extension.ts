@@ -61,14 +61,15 @@ export function activate(context: vscode.ExtensionContext) {
 
       // 設定 Webview 內容
       panel.webview.html = getZoomableFlowchartHTML(code, panel.webview.cspSource, raphaelUri, flowchartUri);
+
+       // 傳送選取行數給 Webview
+        vscode.window.onDidChangeTextEditorSelection((event) => {
+        if (event.textEditor.document.uri.fsPath === pyFile) {
+            const activeLine = event.selections[0].active.line + 1; // 行號從 1 開始
+            panel.webview.postMessage({ type: 'highlight-line', line: activeLine });
+        }
     });
 
-    // 傳送選取行數給 Webview
-    vscode.window.onDidChangeTextEditorSelection((event) => {
-    if (event.textEditor.document.uri.fsPath === pyFile) {
-        const activeLine = event.selections[0].active.line + 1; // 行號從 1 開始
-        panel.webview.postMessage({ type: 'highlight-line', line: activeLine });
-    }
     });
 
   });
@@ -404,10 +405,10 @@ function getZoomableFlowchartHTML(flowchartCode: string, cspSource: string, raph
                 const line = message.line;
                 highlightNodeByLine(line);
             }
-            });
+        });
 
-            // 根據行號高亮節點（你需要自己定義對應關係）
-            function highlightNodeByLine(line) {
+        // 根據行號高亮節點（你需要自己定義對應關係）
+        function highlightNodeByLine(line) {
             // 清除之前高亮
             document.querySelectorAll('g.element').forEach(g => {
                 g.querySelector('rect, path')?.setAttribute('fill', 'white');
@@ -416,8 +417,8 @@ function getZoomableFlowchartHTML(flowchartCode: string, cspSource: string, raph
             // 根據你的流程圖字串，尋找包含該行的節點 (要配合 pyflowchart 的 DSL 加工)
             const matches = [...document.querySelectorAll('g.element text')];
             for (const el of matches) {
-                if (el.textContent?.includes(`line ${line}`)) { // ex: 你改寫 DSL 時加上 "line 12"
-                el.parentElement?.querySelector('rect, path')?.setAttribute('fill', '#ffef9f');
+                if (el.textContent?.includes(`line ${line}:`)) {
+                    el.parentElement?.querySelector('rect, path')?.setAttribute('fill', '#ffef9f');
                 }
             }
         }
