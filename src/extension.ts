@@ -28,6 +28,7 @@ export function activate(context: vscode.ExtensionContext) {
     // exec(cmd, (err, stdout, stderr) => {
     
     // 修改後：
+    let panel: vscode.WebviewPanel | undefined = undefined;
     exec(cmd, { env: { ...process.env, PYTHONIOENCODING: 'utf-8' } }, (err, stdout, stderr) => {
       if (err) {
         vscode.window.showErrorMessage(`pyflowchart 失敗：${stderr || err.message}`);
@@ -41,7 +42,7 @@ export function activate(context: vscode.ExtensionContext) {
       }
 
       // 建立 Webview Panel
-      const panel = vscode.window.createWebviewPanel(
+      panel = vscode.window.createWebviewPanel(
         'flowchartPreview',
         `Flowchart - ${path.basename(pyFile)}`,
         vscode.ViewColumn.Beside,
@@ -61,17 +62,19 @@ export function activate(context: vscode.ExtensionContext) {
 
       // 設定 Webview 內容
       panel.webview.html = getZoomableFlowchartHTML(code, panel.webview.cspSource, raphaelUri, flowchartUri);
-
-       // 傳送選取行數給 Webview
-        vscode.window.onDidChangeTextEditorSelection((event) => {
-        if (event.textEditor.document.uri.fsPath === pyFile) {
-            const activeLine = event.selections[0].active.line + 1; // 行號從 1 開始
-            panel.webview.postMessage({ type: 'highlight-line', line: activeLine });
-        }
     });
 
-    });
+    // 傳送選取行數給 Webview
+    vscode.window.onDidChangeTextEditorSelection((event) => {
+        if (!panel) {return;}
 
+        const activeEditor = event.textEditor;
+        if (!activeEditor) {return;}
+
+        const activeLine = activeEditor.selection.active.line + 1;
+        console.log('傳送 highlight 指令行號:', activeLine);
+        panel.webview.postMessage({ type: 'highlight-line', line: activeLine });
+    });
   });
 
   context.subscriptions.push(disposable);
@@ -401,14 +404,17 @@ function getZoomableFlowchartHTML(flowchartCode: string, cspSource: string, raph
         // 接收從 Extension 傳來的行號
         window.addEventListener('message', event => {
             const message = event.data;
+            console.log('收到訊息:', message);
             if (message.type === 'highlight-line') {
                 const line = message.line;
+                console.log('收到 highlight 指令，行號:', line);
                 highlightNodeByLine(line);
             }
         });
 
         // 根據行號高亮節點（你需要自己定義對應關係）
         function highlightNodeByLine(line) {
+            console.log('開始比對節點，尋找 line:', line);
             // 清除之前高亮
             document.querySelectorAll('g.element').forEach(g => {
                 g.querySelector('rect, path')?.setAttribute('fill', 'white');
@@ -417,7 +423,8 @@ function getZoomableFlowchartHTML(flowchartCode: string, cspSource: string, raph
             // 根據你的流程圖字串，尋找包含該行的節點 (要配合 pyflowchart 的 DSL 加工)
             const matches = [...document.querySelectorAll('g.element text')];
             for (const el of matches) {
-                if (el.textContent?.includes(`line ${line}:`)) {
+                console.log('節點內容:', el.textContent);
+                if (el.textContent?.includes(\`line \\\${line}:\`)) {
                     el.parentElement?.querySelector('rect, path')?.setAttribute('fill', '#ffef9f');
                 }
             }
