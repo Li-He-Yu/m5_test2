@@ -965,6 +965,10 @@ def parse(ast_list: List[_ast.AST], **kwargs) -> ParseProcessGraph:
 
         node = ast_node_class(ast_object, **kwargs)
 
+        # 把 AST 的 lineno 記錄下來
+        if hasattr(ast_object, 'lineno') and hasattr(node, 'lineno'):
+            node.lineno = ast_object.lineno
+
         if head_node is None:  # is the first node
             head_node = node
             tail_node = node
