@@ -215,6 +215,8 @@
         let canvasPosition = { x: 0, y: 0 };
         let minimapVisible = false;
         const code = ${escapedCode};// 紅底是 vscode 靜態檢查錯誤，這邊會從 extension 傳送近來 code
+        console.log('嘗試印出從 extension.ts 傳進的 flowchart code')
+        console.log(code)
         
         function updateStatus(message, isError = false) {
             const statusEl = document.getElementById('status');
@@ -324,13 +326,46 @@
             if (message.type === 'highlight-line') {
                 const line = message.line;
                 console.log('收到 highlight 指令，行號:', line);
-                highlightNodeByLine(line);
+                waitForSvgThenHighlight(line);
             }
         });
 
+        function waitForSvgThenHighlight(line) {
+            const maxTries = 30;
+            let tries = 0;
+
+            const interval = setInterval(() => {
+                const elements = document.querySelectorAll('g.element');
+                if (elements.length > 0 || tries >= maxTries) {
+                    clearInterval(interval);
+                    if (elements.length > 0) {
+                        console.log('SVG 節點出現，開始 highlight');
+                        highlightNodeByLine(line);
+                    } else {
+                        console.warn('等待超時，仍然找不到流程圖節點');
+                    }
+                }
+                tries++;
+            }, 100);// interval time: assign 100
+        }
+
         // 根據行號高亮節點（你需要自己定義對應關係）
         function highlightNodeByLine(line) {
+            // 檢查有沒有找到任何節點。
+            const nodes = document.querySelectorAll('g.element');
+            console.log('找到了幾個 g.element 節點:', nodes.length);
+            nodes.forEach(g => {
+                const t = g.querySelector('text');
+                console.log('節點文字:', t?.textContent);
+            });
+
+            // console 印出所有節點文字的迴圈
+            document.querySelectorAll('g.element text').forEach(el => {
+                console.log('節點文字:', el.textContent);
+            });
+
             console.log('開始比對節點，尋找 line:', line);
+
             // 清除之前高亮
             document.querySelectorAll('g.element').forEach(g => {
                 g.querySelector('rect, path')?.setAttribute('fill', 'white');
@@ -340,7 +375,9 @@
             const matches = [...document.querySelectorAll('g.element text')];
             for (const el of matches) {
                 console.log('節點內容:', el.textContent);
-                if (el.textContent?.includes('line ${line}:')) {
+                // if (el.textContent?.includes('line ${line}:')) {
+                if (el.textContent?.includes(`line ${line}:`)) {
+                    console.log('比對內容:', el.textContent, '是否包含:', `line ${line}:`);
                     el.parentElement?.querySelector('rect, path')?.setAttribute('fill', '#ffef9f');
                 }
             }
