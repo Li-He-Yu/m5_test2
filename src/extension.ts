@@ -1,647 +1,520 @@
 import * as vscode from 'vscode';
-import { exec } from 'child_process';
 import * as path from 'path';
+import { spawn } from 'child_process';
+
+interface FlowChartMapping {
+    lineToNode: Map<number, string>;
+    nodeToLine: Map<string, number[]>;
+}
+
+// Global variables to maintain state
+let currentPanel: vscode.WebviewPanel | undefined = undefined;
+let currentEditor: vscode.TextEditor | undefined = undefined;
+let lineToNodeMap: Map<number, string> = new Map();
+let nodeToLineMap: Map<string, number[]> = new Map();
 
 export function activate(context: vscode.ExtensionContext) {
-  const disposable = vscode.commands.registerCommand('m5-test2.generate', async (uri?: vscode.Uri) => {
-    const target = uri ?? vscode.window.activeTextEditor?.document.uri;
-    if (!target) {
-      vscode.window.showWarningMessage('找不到檔案');
-      return;
-    }
+    console.log('Python Flow Chart extension is now active!');
 
-    const pyFile = target.fsPath;
-    if (!pyFile.endsWith('.py')) {
-      vscode.window.showWarningMessage('只能處理 .py 檔案');
-      return;
-    }
+    // Register command to show flow chart
+    let disposable = vscode.commands.registerCommand('m5-test2.generate', async () => {
+        const editor = vscode.window.activeTextEditor;
+        if (!editor || editor.document.languageId !== 'python') {
+            vscode.window.showErrorMessage('Please open a Python file first');
+            return;
+        }
 
-    // 執行 pyflowchart
-    const cmd = `python -m pyflowchart "${pyFile}"`;
-    exec(cmd, (err, stdout, stderr) => {
-      if (err) {
-        vscode.window.showErrorMessage(`pyflowchart 失敗：${stderr || err.message}`);
-        return;
-      }
-      
-      const code = stdout.trim();
-      if (!code) {
-        vscode.window.showErrorMessage('pyflowchart 沒有輸出');
-        return;
-      }
-
-      // 建立 Webview Panel
-      const panel = vscode.window.createWebviewPanel(
-        'flowchartPreview',
-        `Flowchart - ${path.basename(pyFile)}`,
-        vscode.ViewColumn.Beside,
-        { 
-          enableScripts: true,
-          localResourceRoots: [vscode.Uri.file(path.join(context.extensionPath, 'media'))]
-        }
-      );
-
-      // 取得本地檔案路徑
-      const mediaPath = path.join(context.extensionPath, 'media');
-      const raphaelPath = path.join(mediaPath, 'raphael.min.js');
-      const flowchartPath = path.join(mediaPath, 'flowchart.min.js');
-      
-      const raphaelUri = panel.webview.asWebviewUri(vscode.Uri.file(raphaelPath));
-      const flowchartUri = panel.webview.asWebviewUri(vscode.Uri.file(flowchartPath));
-
-      // 設定 Webview 內容
-      panel.webview.html = getZoomableFlowchartHTML(code, panel.webview.cspSource, raphaelUri, flowchartUri);
-    });
-  });
-
-  context.subscriptions.push(disposable);
-}
-
-function getZoomableFlowchartHTML(flowchartCode: string, cspSource: string, raphaelUri: vscode.Uri, flowchartUri: vscode.Uri): string {
-  const escapedCode = flowchartCode
-    .replace(/\\/g, '\\\\')
-    .replace(/`/g, '\\`')
-    .replace(/\$/g, '\\$');
-
-  return `<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="UTF-8">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src ${cspSource} 'unsafe-inline'; style-src ${cspSource} 'unsafe-inline';">
-    <title>Flowchart Preview</title>
-    <style>
-        body { 
-            font-family: Arial, sans-serif; 
-            margin: 20px; 
-            background: white;
-            color: #333;
-            overflow: hidden; /* 防止頁面滾動條 */
-        }
-        .header h2 {
-            margin: 0 0 20px 0;
-            color: #333;
-        }
-        .controls {
-            margin-bottom: 20px;
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            flex-wrap: wrap;
-        }
-        .button {
-            background: #007acc;
-            color: white;
-            border: none;
-            padding: 8px 16px;
-            border-radius: 4px;
-            cursor: pointer;
-            font-size: 14px;
-            transition: background 0.2s;
-        }
-        .button:hover {
-            background: #005a9e;
-        }
-        .button:disabled {
-            background: #ccc;
-            cursor: not-allowed;
-        }
+        currentEditor = editor;
+        const pythonCode = editor.document.getText();
         
-        /* 縮放控制器樣式 */
-        .zoom-controls {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            background: #f0f0f0;
-            padding: 5px 10px;
-            border-radius: 6px;
-            border: 1px solid #ddd;
-        }
-        .zoom-btn {
-            background: #fff;
-            border: 1px solid #ccc;
-            width: 30px;
-            height: 30px;
-            border-radius: 4px;
-            cursor: pointer;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-weight: bold;
-            color: #333;
-            transition: all 0.2s;
-        }
-        .zoom-btn:hover {
-            background: #e6f3ff;
-            border-color: #007acc;
-        }
-        .zoom-info {
-            font-size: 12px;
-            color: #666;
-            min-width: 45px;
-            text-align: center;
-        }
-        
-        /* 流程圖容器樣式 */
-        #canvas-container { 
-            border: 1px solid #ccc; 
-            background: white;
-            overflow: auto;
-            position: relative;
-            height: calc(100vh - 200px); /* 動態高度 */
-        }
-        
-        #canvas {
-            transform-origin: 0 0;
-            transition: transform 0.2s ease;
-            min-width: 100%;
-            min-height: 100%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            position: relative;
-        }
-        
-        .error { 
-            color: #d63384; 
-            background: #f8d7da; 
-            padding: 10px; 
-            border-radius: 4px; 
-            border: 1px solid #f5c2c7;
-        }
-        .loading { 
-            text-align: center; 
-            padding: 40px; 
-            color: #666; 
-        }
-        .code-display {
-            background: #f8f9fa;
-            padding: 15px;
-            margin: 10px 0;
-            font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
-            font-size: 12px;
-            border-radius: 4px;
-            border: 1px solid #dee2e6;
-            white-space: pre-wrap;
-            display: none;
-        }
-        .status {
-            background: #e7f3ff;
-            border: 1px solid #b3d9ff;
-            color: #004085;
-            padding: 10px;
-            border-radius: 4px;
-            margin-bottom: 15px;
-            font-size: 14px;
-        }
-        
-        /* 確保 SVG 在容器中正確顯示 */
-        #canvas svg {
-            max-width: none !important;
-            height: auto !important;
-        }
-        
-        /* 迷你地圖樣式 */
-        .minimap {
-            position: absolute;
-            top: 10px;
-            right: 10px;
-            width: 150px;
-            height: 100px;
-            background: rgba(255, 255, 255, 0.9);
-            border: 1px solid #ccc;
-            border-radius: 4px;
-            z-index: 100;
-            overflow: hidden;
-            display: none;
-        }
-        .minimap-content {
-            transform-origin: 0 0;
-            transform: scale(0.1);
-        }
-        .minimap-viewport {
-            position: absolute;
-            border: 2px solid #007acc;
-            background: rgba(0, 122, 204, 0.1);
-            pointer-events: none;
-        }
-    </style>
-</head>
-<body>
-    <div class="header">
-        <h2>Python 流程圖預覽</h2>
-    </div>
-    
-    <div id="status" class="status">
-        🔄 正在載入 flowchart.js...
-    </div>
-    
-    <div class="controls">
-        <button class="button" onclick="toggleCode()">顯示/隱藏原始碼</button>
-        <button class="button" onclick="downloadSVG()" id="downloadBtn" style="display: none;">下載 SVG</button>
-        
-        <!-- 縮放控制器 -->
-        <div class="zoom-controls">
-            <div class="zoom-btn" onclick="zoomOut()" title="縮小">−</div>
-            <div class="zoom-info" id="zoomLevel">100%</div>
-            <div class="zoom-btn" onclick="zoomIn()" title="放大">+</div>
-            <div class="zoom-btn" onclick="resetZoom()" title="重設縮放">⌂</div>
-            <div class="zoom-btn" onclick="fitToWindow()" title="適應視窗">⊞</div>
-        </div>
-        
-        <button class="button" onclick="toggleMinimap()" id="minimapToggle" style="display: none;">迷你地圖</button>
-    </div>
-    
-    <div id="canvas-container">
-        <div id="canvas">
-            <div class="loading">正在載入流程圖...</div>
-        </div>
-        
-        <!-- 迷你地圖 -->
-        <div class="minimap" id="minimap">
-            <div class="minimap-content" id="minimap-content"></div>
-            <div class="minimap-viewport" id="minimap-viewport"></div>
-        </div>
-    </div>
-    
-    <div id="code-display" class="code-display">${escapedCode}</div>
-    
-    <!-- 載入順序很重要：先 Raphael，再 flowchart -->
-    <script src="${raphaelUri}"></script>
-    <script src="${flowchartUri}"></script>
-    <script>
-        let initAttempts = 0;
-        const maxAttempts = 50;
-        let currentZoom = 1;
-        let isDragging = false;
-        let dragStart = { x: 0, y: 0 };
-        let canvasPosition = { x: 0, y: 0 };
-        let minimapVisible = false;
-        
-        function updateStatus(message, isError = false) {
-            const statusEl = document.getElementById('status');
-            statusEl.textContent = message;
-            statusEl.style.background = isError ? '#f8d7da' : '#e7f3ff';
-            statusEl.style.color = isError ? '#721c24' : '#004085';
-            statusEl.style.borderColor = isError ? '#f5c2c7' : '#b3d9ff';
-        }
-        
-        function waitForLibraries() {
-            initAttempts++;
-            console.log('嘗試初始化，第', initAttempts, '次');
-            console.log('Raphael 類型:', typeof Raphael);
-            console.log('flowchart 類型:', typeof flowchart);
-            
-            if (typeof Raphael !== 'undefined' && typeof flowchart !== 'undefined') {
-                console.log('✅ Raphael 和 flowchart 都已載入');
-                updateStatus('✅ 庫載入成功，正在渲染流程圖...');
-                setTimeout(initChart, 100);
-            } else if (initAttempts < maxAttempts) {
-                let missing = [];
-                if (typeof Raphael === 'undefined') missing.push('Raphael.js');
-                if (typeof flowchart === 'undefined') missing.push('flowchart.js');
-                updateStatus(\`⏳ 等待載入: \${missing.join(', ')}...\`);
-                setTimeout(waitForLibraries, 100);
-            } else {
-                let errorMsg = '❌ 載入超時：';
-                if (typeof Raphael === 'undefined') errorMsg += ' Raphael.js 未載入';
-                if (typeof flowchart === 'undefined') errorMsg += ' flowchart.js 未載入';
-                updateStatus(errorMsg, true);
-                document.getElementById('canvas').innerHTML = 
-                    '<div class="error">' + errorMsg + '</div>';
-            }
-        }
-        
-        function initChart() {
-            try {
-                const code = \`${escapedCode}\`;
-                console.log('開始解析流程圖代碼:', code);
-                
-                if (!code.trim()) {
-                    updateStatus('❌ 沒有可用的流程圖代碼', true);
-                    document.getElementById('canvas').innerHTML = 
-                        '<div class="error">沒有可用的流程圖代碼</div>';
-                    return;
+        // Create or reveal webview
+        if (currentPanel) {
+            currentPanel.reveal(vscode.ViewColumn.Two);
+        } else {
+            currentPanel = vscode.window.createWebviewPanel(
+                'pythonFlowChart',
+                'Python Flow Chart',
+                vscode.ViewColumn.Two,
+                {
+                    enableScripts: true,
+                    retainContextWhenHidden: true
                 }
-                
-                updateStatus('🔧 正在解析流程圖...');
-                
-                // 清空容器
-                document.getElementById('canvas').innerHTML = '';
-                
-                // 解析並渲染流程圖
-                console.log('解析流程圖...');
-                const diagram = flowchart.parse(code);
-                console.log('✅ 流程圖解析成功:', diagram);
-                
-                updateStatus('🎨 正在渲染 SVG...');
-                
-                // 渲染到 canvas
-                diagram.drawSVG('canvas', {
-                    'line-width': 2,
-                    'line-length': 50,
-                    'text-margin': 10,
-                    'font-size': 14,
-                    'font-color': '#333',
-                    'line-color': '#333',
-                    'element-color': '#333',
-                    'fill': 'white',
-                    'yes-text': 'yes',
-                    'no-text': 'no',
-                    'arrow-end': 'block',
-                    'scale': 1
+            );
+
+            currentPanel.onDidDispose(() => {
+                currentPanel = undefined;
+            }, null, context.subscriptions);
+        }
+
+        // Generate flow chart
+        try {
+            console.log('Generating flow chart...');
+            vscode.window.showInformationMessage('Generating flow chart...');
+            
+            const { svg, mapping } = await generateFlowChart(pythonCode, context.extensionPath);
+            console.log('SVG generated, length:', svg.length);
+            console.log('Mapping generated:', mapping.lineToNode.size, 'lines,', mapping.nodeToLine.size, 'nodes');
+            
+            // Log the line mappings for debugging
+            console.log('Line to Node mappings:');
+            mapping.lineToNode.forEach((nodeId, line) => {
+                console.log(`  Line ${line} -> ${nodeId}`);
+            });
+            
+            console.log('Node to Line mappings:');
+            mapping.nodeToLine.forEach((lines, nodeId) => {
+                console.log(`  ${nodeId} -> Lines: ${lines.join(', ')}`);
+            });
+            const cleanedSvg = svg.replace(/\r\n/g, '\n').replace(/\\/g, '');
+
+
+            // Log what's in the SVG
+            console.log('Checking SVG for node_1:');
+            if (cleanedSvg.includes('node_1')) {
+                console.log('node_1 found in SVG');
+                // Extract the title element for node_1
+                const node1Match = cleanedSvg.match(/<g[^>]*id="node_1"[^>]*>[\s\S]*?<title>([^<]+)<\/title>/);
+                if (node1Match) {
+                    console.log('node_1 title content:', node1Match[1]);
+                }
+            } else {
+                console.log('node_1 NOT found in SVG');
+            }
+            
+            lineToNodeMap = mapping.lineToNode;
+            nodeToLineMap = mapping.nodeToLine;
+            
+            // Clean and set HTML content
+            
+            
+            // Also log the SVG to check node IDs
+            const nodeMatches = cleanedSvg.match(/id="node_\d+"/g);
+            if (nodeMatches) {
+                console.log('SVG contains nodes:', nodeMatches);
+            }
+            
+            currentPanel.webview.html = getWebviewContent(cleanedSvg);
+            
+            vscode.window.showInformationMessage('Flow chart generated successfully! Click on code lines to highlight nodes.');
+            
+            // Handle messages from webview
+            currentPanel.webview.onDidReceiveMessage(
+                message => {
+                    console.log('Received message from webview:', message);
+                    switch (message.command) {
+                        case 'nodeClicked':
+                            highlightCodeLines(message.nodeId);
+                            return;
+                    }
+                },
+                undefined,
+                context.subscriptions
+            );
+        } catch (error: any) {
+            console.error('Error details:', error);
+            vscode.window.showErrorMessage(`Error generating flow chart: ${error.message || error}`);
+        }
+    });
+
+    // Register cursor change handler
+    const selectionHandler = vscode.window.onDidChangeTextEditorSelection(event => {
+        if (currentPanel && event.textEditor === currentEditor) {
+            const line = event.selections[0].active.line + 1; // VSCode lines are 0-based
+            const nodeId = lineToNodeMap.get(line);
+            
+            console.log(`Cursor at line ${line}, nodeId: ${nodeId}`);
+            
+            if (nodeId) {
+                // Send message to webview to highlight the node
+                currentPanel.webview.postMessage({
+                    command: 'highlightNode',
+                    nodeId: nodeId
                 });
                 
-                console.log('✅ 流程圖渲染完成');
-                updateStatus('✅ 流程圖已成功生成！');
-                
-                // 顯示功能按鈕
-                document.getElementById('downloadBtn').style.display = 'inline-block';
-                document.getElementById('minimapToggle').style.display = 'inline-block';
-                
-                // 初始化縮放和拖動功能
-                initZoomAndPan();
-                
-                // 確保初始位置正確
-                resetZoom();
-                
-                // 3秒後隱藏狀態訊息
-                setTimeout(() => {
-                    document.getElementById('status').style.display = 'none';
-                }, 3000);
-                
-            } catch (error) {
-                console.error('❌ 渲染錯誤:', error);
-                console.error('錯誤堆疊:', error.stack);
-                updateStatus('❌ 渲染失敗: ' + error.message, true);
-                document.getElementById('canvas').innerHTML = 
-                    '<div class="error">渲染失敗: ' + error.message + '<br><br>詳細錯誤請查看 Console (F12)</div>';
+                // Optional: Show status bar message
+                vscode.window.setStatusBarMessage(`Flow chart node: ${nodeId}`, 2000);
+            } else {
+                // Clear highlight if line has no corresponding node
+                currentPanel.webview.postMessage({
+                    command: 'clearHighlight'
+                });
             }
         }
-        
-        // 縮放功能
-        function zoomIn() {
-            currentZoom = Math.min(currentZoom * 1.2, 5); // 最大 500%
-            updateZoom();
-        }
-        
-        function zoomOut() {
-            currentZoom = Math.max(currentZoom / 1.2, 0.1); // 最小 10%
-            updateZoom();
-        }
-        
-        function resetZoom() {
-            currentZoom = 1;
-            canvasPosition = { x: 0, y: 0 };
-            originalSvgWidth = 0;  // 重設原始尺寸，讓下次重新測量
-            originalSvgHeight = 0;
-            updateZoom();
-        }
-        
-        function fitToWindow() {
-            const container = document.getElementById('canvas-container');
-            const canvas = document.getElementById('canvas');
-            const svg = canvas.querySelector('svg');
-            
-            if (!svg) return;
-            
-            const containerRect = container.getBoundingClientRect();
-            const svgRect = svg.getBoundingClientRect();
-            
-            const scaleX = (containerRect.width - 40) / svgRect.width;
-            const scaleY = (containerRect.height - 40) / svgRect.height;
-            
-            currentZoom = Math.min(scaleX, scaleY, 1); // 不超過 100%
-            canvasPosition = { x: 0, y: 0 };
-            updateZoom();
-        }
-        
-        let originalSvgWidth = 0;
-        let originalSvgHeight = 0;
-        
-        function updateZoom() {
-            const canvas = document.getElementById('canvas');
-            const container = document.getElementById('canvas-container');
-            const svg = canvas.querySelector('svg');
-            
-            if (svg) {
-                // 第一次獲取原始尺寸
-                if (originalSvgWidth === 0) {
-                    // 暫時移除所有變換來獲取真實尺寸
-                    const originalTransform = canvas.style.transform;
-                    canvas.style.transform = 'none';
-                    
-                    const svgRect = svg.getBoundingClientRect();
-                    originalSvgWidth = svgRect.width;
-                    originalSvgHeight = svgRect.height;
-                    
-                    // 恢復變換
-                    canvas.style.transform = originalTransform;
-                }
-                
-                const containerRect = container.getBoundingClientRect();
-                
-                // 計算縮放後的實際尺寸
-                const scaledWidth = originalSvgWidth * currentZoom;
-                const scaledHeight = originalSvgHeight * currentZoom;
-                
-                // 重新計算邊界：確保能看到圖片的所有部分
-                let maxX = 0, maxY = 0;
-                
-                if (scaledWidth > containerRect.width) {
-                    // 水平方向：允許移動距離 = (圖片寬度 - 容器寬度) / 2 / 縮放比例
-                    maxX = (scaledWidth - containerRect.width) / 2 / currentZoom;
-                }
-                
-                if (scaledHeight > containerRect.height) {
-                    // 垂直方向：允許移動距離 = (圖片高度 - 容器高度) / 2 / 縮放比例
-                    maxY = (scaledHeight - containerRect.height) / 2 / currentZoom;
-                }
-                
-                // 應用邊界限制，但給一點寬容度
-                const tolerance = 10; // 10px 的寬容度
-                canvasPosition.x = Math.max(-(maxX + tolerance), Math.min(maxX + tolerance, canvasPosition.x));
-                canvasPosition.y = Math.max(-(maxY + tolerance), Math.min(maxY + tolerance, canvasPosition.y));
-                
-                // 如果圖片小於容器，居中顯示
-                if (scaledWidth <= containerRect.width) {
-                    canvasPosition.x = 0;
-                }
-                if (scaledHeight <= containerRect.height) {
-                    canvasPosition.y = 0;
-                }
-            }
-            
-            canvas.style.transform = \`scale(\${currentZoom}) translate(\${canvasPosition.x}px, \${canvasPosition.y}px)\`;
-            
-            // 更新縮放顯示
-            document.getElementById('zoomLevel').textContent = Math.round(currentZoom * 100) + '%';
-            
-            // 更新迷你地圖
-            updateMinimap();
-        }
-        
-        // 拖動功能
-        function initZoomAndPan() {
-            const container = document.getElementById('canvas-container');
-            
-            // 滑鼠拖動
-            container.addEventListener('mousedown', startDrag);
-            document.addEventListener('mousemove', drag);
-            document.addEventListener('mouseup', endDrag);
-            
-            // 滾輪上下移動 (不縮放)
-            container.addEventListener('wheel', (e) => {
-                e.preventDefault();
-                
-                // 滾輪控制上下移動
-                const scrollSpeed = 30;
-                
-                // 簡單直接的移動
-                if (e.deltaY > 0) {
-                    canvasPosition.y -= scrollSpeed; // 向下滾動，圖片向上移動
-                } else {
-                    canvasPosition.y += scrollSpeed; // 向上滾動，圖片向下移動
-                }
-                
-                // 更新顯示
-                updateZoom();
-            });
-            
-            // 鍵盤快捷鍵
-            document.addEventListener('keydown', (e) => {
-                if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
-                
-                const moveSpeed = 20; // 方向鍵移動速度
-                
-                switch(e.key) {
-                    case '+':
-                    case '=':
-                        e.preventDefault();
-                        zoomIn();
-                        break;
-                    case '-':
-                        e.preventDefault();
-                        zoomOut();
-                        break;
-                    case '0':
-                        if (e.ctrlKey || e.metaKey) {
-                            e.preventDefault();
-                            resetZoom();
-                        }
-                        break;
-                    case 'ArrowUp':
-                        e.preventDefault();
-                        canvasPosition.y += moveSpeed;
-                        updateZoom(); // 內部會限制邊界
-                        break;
-                    case 'ArrowDown':
-                        e.preventDefault();
-                        canvasPosition.y -= moveSpeed;
-                        updateZoom(); // 內部會限制邊界
-                        break;
-                    case 'ArrowLeft':
-                        e.preventDefault();
-                        canvasPosition.x += moveSpeed;
-                        updateZoom(); // 內部會限制邊界
-                        break;
-                    case 'ArrowRight':
-                        e.preventDefault();
-                        canvasPosition.x -= moveSpeed;
-                        updateZoom(); // 內部會限制邊界
-                        break;
-                }
-            });
-        }
-        
-        function startDrag(e) {
-            if (e.button === 0) { // 左鍵
-                isDragging = true;
-                dragStart = { x: e.clientX - canvasPosition.x, y: e.clientY - canvasPosition.y };
-                e.preventDefault();
-            }
-        }
-        
-        function drag(e) {
-            if (isDragging) {
-                const newX = e.clientX - dragStart.x;
-                const newY = e.clientY - dragStart.y;
-                
-                canvasPosition.x = newX;
-                canvasPosition.y = newY;
-                
-                updateZoom(); // 內部會限制邊界
-                e.preventDefault();
-            }
-        }
-        
-        function endDrag() {
-            isDragging = false;
-        }
-        
-        // 迷你地圖功能
-        function toggleMinimap() {
-            minimapVisible = !minimapVisible;
-            const minimap = document.getElementById('minimap');
-            minimap.style.display = minimapVisible ? 'block' : 'none';
-            updateMinimap();
-        }
-        
-        function updateMinimap() {
-            if (!minimapVisible) return;
-            
-            const canvas = document.getElementById('canvas');
-            const svg = canvas.querySelector('svg');
-            const minimapContent = document.getElementById('minimap-content');
-            
-            if (svg && minimapContent) {
-                // 複製 SVG 到迷你地圖
-                minimapContent.innerHTML = svg.outerHTML;
-                
-                // 更新迷你地圖中的 SVG 縮放
-                const minimapSvg = minimapContent.querySelector('svg');
-                if (minimapSvg) {
-                    minimapSvg.style.maxWidth = 'none';
-                    minimapSvg.style.height = 'auto';
-                }
-            }
-        }
-        
-        function downloadSVG() {
-            const svg = document.querySelector('#canvas svg');
-            if (!svg) {
-                alert('沒有可用的 SVG 內容');
-                return;
-            }
-            
-            // 克隆 SVG 並設置合適的屬性
-            const svgClone = svg.cloneNode(true);
-            svgClone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
-            
-            const serializer = new XMLSerializer();
-            const svgStr = serializer.serializeToString(svgClone);
-            const blob = new Blob([svgStr], { type: 'image/svg+xml' });
-            const url = URL.createObjectURL(blob);
-            
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = 'flowchart.svg';
-            a.click();
-            
-            URL.revokeObjectURL(url);
-        }
-        
-        function toggleCode() {
-            const codeDisplay = document.getElementById('code-display');
-            codeDisplay.style.display = codeDisplay.style.display === 'none' ? 'block' : 'none';
-        }
-        
-        // 開始載入檢測
-        console.log('🚀 開始等待庫載入...');
-        updateStatus('🔄 正在載入必要的庫...');
-        waitForLibraries();
-    </script>
-</body>
-</html>`;
+    });
+    
+    context.subscriptions.push(selectionHandler);
+    context.subscriptions.push(disposable);
 }
 
-export function deactivate() {}
+async function generateFlowChart(pythonCode: string, extensionPath: string): Promise<{svg: string, mapping: FlowChartMapping}> {
+    return new Promise((resolve, reject) => {
+        const pythonScriptPath = path.join(extensionPath, 'src', 'python', 'ast_to_graphviz.py');
+        console.log('Python script path:', pythonScriptPath);
+        
+        // Get Python path from configuration
+        const config = vscode.workspace.getConfiguration('python-flowchart');
+        const pythonPath = config.get<string>('pythonPath', 'python');
+        console.log('Using Python:', pythonPath);
+        
+        // Spawn Python process with UTF-8 encoding
+        const pythonProcess = spawn(pythonPath, ['-u', pythonScriptPath], {
+            env: { ...process.env, PYTHONIOENCODING: 'utf-8' }
+        });
+        
+        let output = '';
+        let error = '';
+
+        pythonProcess.stdout.setEncoding('utf8');
+        pythonProcess.stderr.setEncoding('utf8');
+
+        pythonProcess.stdout.on('data', (data) => {
+            output += data;
+            console.log('Python stdout chunk received, length:', data.length);
+        });
+
+        pythonProcess.stderr.on('data', (data) => {
+            error += data;
+            console.error('Python stderr:', data);
+        });
+
+        pythonProcess.on('error', (err) => {
+            console.error('Failed to start Python process:', err);
+            reject(err);
+        });
+
+        pythonProcess.on('close', (code) => {
+            console.log('Python process exited with code:', code);
+            if (code !== 0) {
+                reject(new Error(error || 'Python script failed'));
+            } else {
+                try {
+                    const result = JSON.parse(output);
+                    const lineToNodeEntries: [number, string][] = Object.entries(result.lineToNode)
+                        .map(([k, v]) => [parseInt(k), v as string]);
+                    const nodeToLineEntries: [string, number[]][] = Object.entries(result.nodeToLine)
+                        .map(([k, v]) => [k, v as number[]]);
+                    
+                    resolve({
+                        svg: result.svg,
+                        mapping: {
+                            lineToNode: new Map(lineToNodeEntries),
+                            nodeToLine: new Map(nodeToLineEntries)
+                        }
+                    });
+                } catch (e) {
+                    console.error('Failed to parse Python output:', e);
+                    console.error('Output was:', output);
+                    reject(new Error('Failed to parse Python output'));
+                }
+            }
+        });
+
+        // Send Python code to the script with UTF-8 encoding
+        pythonProcess.stdin.setDefaultEncoding('utf8');
+        pythonProcess.stdin.write(pythonCode);
+        pythonProcess.stdin.end();
+    });
+}
+
+function highlightCodeLines(nodeId: string) {
+    if (!currentEditor || !nodeToLineMap.has(nodeId)) return;
+
+    const lines = nodeToLineMap.get(nodeId);
+    if (!lines || lines.length === 0) return;
+
+    const startLine = Math.min(...lines) - 1;
+    const endLine = Math.max(...lines) - 1;
+
+    const startPos = new vscode.Position(startLine, 0);
+    const endPos = new vscode.Position(endLine, currentEditor.document.lineAt(endLine).text.length);
+    const selection = new vscode.Selection(startPos, endPos);
+
+    currentEditor.selection = selection;
+    currentEditor.revealRange(selection, vscode.TextEditorRevealType.InCenter);
+}
+
+function getWebviewContent(svg: string): string {
+    // Process SVG to ensure nodes have proper IDs
+    let processedSvg = svg;
+    
+    // First, let's see what the SVG structure looks like
+    console.log('Original SVG sample:', svg.substring(0, 1000));
+    
+    // Find all g elements with class="node" and ensure they have the correct ID
+    processedSvg = processedSvg.replace(/<g\s+id="(node_\d+)"\s+class="node">/g, (match, nodeId) => {
+        return `<g id="${nodeId}" class="node clickable" data-node-id="${nodeId}">`;
+    });
+    
+    // Also handle the case where class comes before id
+    processedSvg = processedSvg.replace(/<g\s+class="node"\s+id="(node_\d+)">/g, (match, nodeId) => {
+        return `<g id="${nodeId}" class="node clickable" data-node-id="${nodeId}">`;
+    });
+    
+    // Build HTML content with proper string concatenation
+    const htmlContent = `<!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Python Flow Chart</title>
+        <style>
+            body {
+                margin: 0;
+                padding: 20px;
+                overflow: auto;
+                background-color: white;
+                color: #333;
+            }
+            #graph-container {
+                display: flex;
+                justify-content: center;
+                align-items: center;
+                min-height: calc(100vh - 40px);
+                background: white;
+            }
+            svg {
+                max-width: 100%;
+                height: auto;
+                background: white;
+                overflow: visible !important;
+            }
+            .node {
+                cursor: pointer;
+                transition: opacity 0.3s ease;
+            }
+            .node:hover {
+                opacity: 0.9;
+            }
+            
+            /* Simple glow effect without scaling */
+            .node.glow > ellipse,
+            .node.glow > polygon,
+            .node.glow > path,
+            .node.glow > rect {
+                stroke: #FF6B00 !important;
+                stroke-width: 6px !important;
+                filter: drop-shadow(0 0 20px #FF6B00);
+                animation: glowPulse 1.5s ease-in-out infinite;
+            }
+            
+            @keyframes glowPulse {
+                0%, 100% {
+                    stroke-width: 6px;
+                    filter: drop-shadow(0 0 20px #FF6B00);
+                }
+                50% {
+                    stroke-width: 8px;
+                    filter: drop-shadow(0 0 35px #FF6B00);
+                }
+            }
+            
+            /* Debug styles */
+            .debug-info {
+                position: fixed;
+                top: 10px;
+                left: 10px;
+                background: #f5f5f5;
+                border: 1px solid #ddd;
+                padding: 15px;
+                font-family: Arial, sans-serif;
+                font-size: 14px;
+                box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+                border-radius: 4px;
+                z-index: 1000;
+                text-align: center;
+                color: #666;
+            }
+            
+            .status {
+                position: fixed;
+                bottom: 10px;
+                left: 50%;
+                transform: translateX(-50%);
+                background: #333;
+                color: white;
+                padding: 8px 16px;
+                border-radius: 20px;
+                font-size: 12px;
+                opacity: 0;
+                transition: opacity 0.3s;
+                z-index: 1000;
+            }
+            
+            .status.show {
+                opacity: 1;
+            }
+        </style>
+    </head>
+    <body>
+        <div class="debug-info">
+            <div>Coming soon...</div>
+        </div>
+        <div id="status" class="status"></div>
+        <div id="graph-container">
+            ${processedSvg}
+        </div>
+        <script>
+            const vscode = acquireVsCodeApi();
+            let currentHighlighted = null;
+            
+            function showStatus(message) {
+                const status = document.getElementById('status');
+                status.textContent = message;
+                status.classList.add('show');
+                setTimeout(() => {
+                    status.classList.remove('show');
+                }, 2000);
+            }
+            
+            // Wait for DOM to be ready
+            document.addEventListener('DOMContentLoaded', function() {
+                const nodes = document.querySelectorAll('.node');
+                console.log('Found nodes:', nodes.length);
+                
+                // Debug: Log all node structures
+                nodes.forEach((node, index) => {
+                    console.log('Node ' + index + ':', node);
+                    console.log('  ID:', node.id);
+                    const titleElement = node.querySelector('title');
+                    console.log('  Title:', titleElement ? titleElement.textContent : 'no title');
+                });
+                
+                // Add click handlers to all nodes
+                nodes.forEach(node => {
+                    // Get node ID - Graphviz puts the ID in the <title> element
+                    let nodeId = null;
+                    const titleElement = node.querySelector('title');
+                    if (titleElement && titleElement.textContent) {
+                        nodeId = titleElement.textContent;
+                    }
+                    
+                    // Fallback to id attribute
+                    if (!nodeId) {
+                        nodeId = node.id || node.getAttribute('id');
+                    }
+                    
+                    console.log('Processing node with ID:', nodeId);
+                    
+                    if (nodeId) {
+                        // Store the node ID for easy access later
+                        node.setAttribute('data-flowchart-node-id', nodeId);
+                        
+                        node.addEventListener('click', function(e) {
+                            e.stopPropagation();
+                            console.log('Node clicked:', nodeId);
+                            
+                            vscode.postMessage({
+                                command: 'nodeClicked',
+                                nodeId: nodeId
+                            });
+                            showStatus('Jumped to code line');
+                        });
+                    }
+                    
+                    // Add visual feedback
+                    node.style.cursor = 'pointer';
+                });
+            });
+
+            // Handle highlight messages from extension
+            window.addEventListener('message', event => {
+                const message = event.data;
+                console.log('Received message:', message);
+                
+                switch (message.command) {
+                    case 'highlightNode':
+                        // Remove ALL previous highlights first
+                        document.querySelectorAll('.node').forEach(n => {
+                            n.classList.remove('glow');
+                            n.classList.remove('highlighted');
+                            n.classList.remove('highlighted-alt');
+                            n.classList.remove('highlighted-subtle');
+                        });
+                        
+                        // Clear currentHighlighted
+                        currentHighlighted = null;
+                        
+                        // Find the node - try multiple methods
+                        let node = null;
+                        const allNodes = document.querySelectorAll('.node');
+                        
+                        // Method 1: Direct ID match
+                        node = document.getElementById(message.nodeId);
+                        
+                        // Method 2: Data attribute
+                        if (!node) {
+                            node = document.querySelector('[data-flowchart-node-id="' + message.nodeId + '"]');
+                        }
+                        
+                        // Method 3: Search by title content
+                        if (!node) {
+                            for (let n of allNodes) {
+                                const title = n.querySelector('title');
+                                if (title && title.textContent === message.nodeId) {
+                                    node = n;
+                                    break;
+                                }
+                            }
+                        }
+                        
+                        // Method 4: Check if the node has an ID that matches
+                        if (!node) {
+                            for (let n of allNodes) {
+                                if (n.id === message.nodeId || n.getAttribute('id') === message.nodeId) {
+                                    node = n;
+                                    break;
+                                }
+                            }
+                        }
+                        
+                        console.log('Looking for node:', message.nodeId);
+                        console.log('Found node:', node);
+                        
+                        if (node) {
+                            // Use simple glow effect
+                            node.classList.add('glow');
+                            currentHighlighted = node;
+                            
+                            // Scroll into view with some padding
+                            node.scrollIntoView({ 
+                                behavior: 'smooth', 
+                                block: 'center',
+                                inline: 'center'
+                            });
+                            
+                            console.log('Successfully highlighted node:', message.nodeId);
+                            showStatus('Node highlighted: ' + message.nodeId);
+                        } else {
+                            console.error('Node not found:', message.nodeId);
+                            console.log('Available nodes:');
+                            allNodes.forEach((n, i) => {
+                                console.log('  Node ' + i + ': id="' + n.id + '", title="' + (n.querySelector('title')?.textContent || '') + '"');
+                            });
+                            showStatus('Node not found: ' + message.nodeId);
+                        }
+                        break;
+                        
+                    case 'clearHighlight':
+                        // Clear all highlights
+                        document.querySelectorAll('.node').forEach(n => {
+                            n.classList.remove('glow');
+                            n.classList.remove('highlighted');
+                            n.classList.remove('highlighted-alt');
+                            n.classList.remove('highlighted-subtle');
+                        });
+                        currentHighlighted = null;
+                        break;
+                }
+            });
+        </script>
+    </body>
+    </html>`;
+    
+    return htmlContent;
+}
+
+export function deactivate() {
+    if (currentPanel) {
+        currentPanel.dispose();
+    }
+}
