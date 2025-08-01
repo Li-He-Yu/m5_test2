@@ -95,6 +95,9 @@ def main(code_file, field, inner, output_file, simplify, conds_align):
 
     # not output (-o): plain -> stdout
     # output='*.html': output_html 
+
+    # Debug message
+    print("✅ 使用的是我們自己改的 pyflowchart")
     output(flowchart.flowchart(), output_file, field)
 
 

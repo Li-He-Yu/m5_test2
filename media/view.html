@@ -215,8 +215,10 @@
         let canvasPosition = { x: 0, y: 0 };
         let minimapVisible = false;
         const code = ${escapedCode};// 紅底是 vscode 靜態檢查錯誤，這邊會從 extension 傳送近來 code
-        console.log('嘗試印出從 extension.ts 傳進的 flowchart code')
-        console.log(code)
+
+        // debug message
+        // console.log('嘗試印出從 extension.ts 傳進的 flowchart code')
+        // console.log(code)
         
         function updateStatus(message, isError = false) {
             const statusEl = document.getElementById('status');

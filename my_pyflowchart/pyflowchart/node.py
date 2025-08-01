@@ -72,7 +72,8 @@ class Node(object):
         # give it a line number
         line_info = f"line {self.lineno}: " if self.lineno else ""
 
-        # return f'{self.node_name}{params}=>{self.node_type}: {self.node_text}\n'
+        # print("my ... node.py 被 call")
+        # print(f'{self.node_name}{params}=>{self.node_type}: {line_info}{self.node_text}')
         return f'{self.node_name}{params}=>{self.node_type}: {line_info}{self.node_text}\n'
 
     def fc_connection(self) -> str:
