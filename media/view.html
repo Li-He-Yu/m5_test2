@@ -215,6 +215,8 @@
         let canvasPosition = { x: 0, y: 0 };
         let minimapVisible = false;
         const code = ${escapedCode};// 紅底是 vscode 靜態檢查錯誤，這邊會從 extension 傳送近來 code
+        const vscode = acquireVsCodeApi();
+        let lineElementMap = {}; // 全域變數：行號 → <g> 元素
 
         // debug message
         // console.log('嘗試印出從 extension.ts 傳進的 flowchart code')
@@ -296,6 +298,13 @@
                 
                 console.log('✅ 流程圖渲染完成');
                 updateStatus('✅ 流程圖已成功生成！');
+
+                // ✅ 通知 extension：渲染完成，可接收 highlight-line 指令
+                if (typeof acquireVsCodeApi === 'function') {
+                    vscode.postMessage({ type: 'ready' });
+                }
+                // 在 initChart() 裡渲染完 SVG 後，build 映射
+                lineElementMap = collectLineElementMap();
                 
                 // 顯示功能按鈕
                 document.getElementById('downloadBtn').style.display = 'inline-block';
@@ -321,69 +330,89 @@
             }
         }
 
-        // 接收從 Extension 傳來的行號
-        window.addEventListener('message', event => {
-            const message = event.data;
-            console.log('收到訊息:', message);
-            if (message.type === 'highlight-line') {
-                const line = message.line;
-                console.log('收到 highlight 指令，行號:', line);
-                waitForSvgThenHighlight(line);
+        // 1) 渲染完成後呼叫，建立映射 { line: element } 
+        function collectLineElementMap() {
+            const map = {};
+            // document.querySelectorAll('g.element').forEach(g => {
+            //     // <tspan>line 5: ...</tspan>
+            //     const tspan = g.querySelector('tspan');
+            //     if (!tspan) return;
+            //     const m = tspan.textContent.match(/^line\s+(\d+):/);
+            //     if (m) {
+            //         const lineNum = parseInt(m[1], 10);
+            //         map[lineNum] = g;
+            //     }
+            // });
+
+            // 1. 找到所有 SVG 里的 <text> 节点
+            const texts = document.querySelectorAll('#canvas svg text');
+            console.log('一共找到 text 元素', texts.length);
+
+            texts.forEach(textEl => {
+
+                // 2. 在 <text> 里取出 <tspan>，因为真正包含“line X:”的文字就在 <tspan> 里
+                const t = textEl.querySelector('tspan');
+
+                // 3. 用正则 /^line\s+(\d+):/ 去匹配“line 9:”这类字符串
+                //    ^line\s+  — “line”后面至少一个空白
+                //    (\d+)     — 捕获一串数字（这就是行号）
+                //    :         — 后面跟个冒号
+                const m = t?.textContent.match(/^line\s+(\d+):/);
+                if (!m) return;  // 如果这条 text 里没有“line X:”，就跳过
+
+                  // 4. 把捕获到的数字字符串变成真正的 Number
+                const lineNum = parseInt(m[1], 10);
+
+                // 5. flowchart.js 生成的 id 规则是：
+                //    <rect id="op2">…</rect>
+                //    <text id="op2t">…</text>
+                //    所以 text 元素的 id 末尾多了个 “t”。
+                //    我们把它去掉，就拿到那条对应的 rect 或 path 的 id。
+                const rectId = textEl.id.replace(/t$/, '');
+
+                // 6. 通过这个 rectId 找到它的形状元素
+                const shapeEl = document.getElementById(rectId);
+                if (shapeEl) {
+                    // 7. 把行号 ↔ SVG 形状 元素 一一对应，存到 map 里
+                    map[lineNum] = shapeEl;
+                }
+            });
+
+            // 在 webview 端 console.log 中印出 print map 中的每個映射
+            console.log('映射表:');
+            // 2) 逐条 log，保证每条都能看到
+            for (const [line, el] of Object.entries(map)) {
+              console.log(`line ${line} → element id="${el.id}"`);
+            }
+
+            return map;
+        }
+
+        // highlight 對應節點
+        function highlightByLine(line) {
+            // // 清空所有 shape
+            // document.querySelectorAll('#canvas svg rect, #canvas svg path')
+            //     .forEach(el => el.setAttribute('fill', 'white'));
+            // 清空所有 rect 的 highlight
+            document.querySelectorAll('#canvas svg rect')
+                .forEach(el => el.setAttribute('fill', 'white'));
+
+            // 給對應行的那個 shape 上色
+            const shape = lineElementMap[line];
+            if (shape) {
+                shape.setAttribute('fill', '#ffef9f');
+            } else {
+                console.warn(`找不到行 ${line} 的 shape`);
+            }
+        }
+
+        // 接受 extension.ts 傳過來的行號
+        window.addEventListener('message', e => {
+            const msg = e.data;
+            if (msg.type === 'highlight-line') {
+                highlightByLine(msg.line);
             }
         });
-
-        function waitForSvgThenHighlight(line) {
-            const maxTries = 30;
-            let tries = 0;
-
-            const interval = setInterval(() => {
-                const elements = document.querySelectorAll('g.element');
-                if (elements.length > 0 || tries >= maxTries) {
-                    clearInterval(interval);
-                    if (elements.length > 0) {
-                        console.log('SVG 節點出現，開始 highlight');
-                        highlightNodeByLine(line);
-                    } else {
-                        console.warn('等待超時，仍然找不到流程圖節點');
-                    }
-                }
-                tries++;
-            }, 100);// interval time: assign 100
-        }
-
-        // 根據行號高亮節點（你需要自己定義對應關係）
-        function highlightNodeByLine(line) {
-            // 檢查有沒有找到任何節點。
-            const nodes = document.querySelectorAll('g.element');
-            console.log('找到了幾個 g.element 節點:', nodes.length);
-            nodes.forEach(g => {
-                const t = g.querySelector('text');
-                console.log('節點文字:', t?.textContent);
-            });
-
-            // console 印出所有節點文字的迴圈
-            document.querySelectorAll('g.element text').forEach(el => {
-                console.log('節點文字:', el.textContent);
-            });
-
-            console.log('開始比對節點，尋找 line:', line);
-
-            // 清除之前高亮
-            document.querySelectorAll('g.element').forEach(g => {
-                g.querySelector('rect, path')?.setAttribute('fill', 'white');
-            });
-
-            // 根據你的流程圖字串，尋找包含該行的節點 (要配合 pyflowchart 的 DSL 加工)
-            const matches = [...document.querySelectorAll('g.element text')];
-            for (const el of matches) {
-                console.log('節點內容:', el.textContent);
-                // if (el.textContent?.includes('line ${line}:')) {
-                if (el.textContent?.includes(`line ${line}:`)) {
-                    console.log('比對內容:', el.textContent, '是否包含:', `line ${line}:`);
-                    el.parentElement?.querySelector('rect, path')?.setAttribute('fill', '#ffef9f');
-                }
-            }
-        }
 
         
         // 縮放功能

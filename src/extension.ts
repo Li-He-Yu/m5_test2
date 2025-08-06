@@ -6,6 +6,7 @@ import * as fs from 'fs';
 export function activate(context: vscode.ExtensionContext) {
   const disposable = vscode.commands.registerCommand('m5-test2.generate', async (uri?: vscode.Uri) => {
     const target = uri ?? vscode.window.activeTextEditor?.document.uri;
+    const editorAtStart = vscode.window.activeTextEditor;
     if (!target) {
       vscode.window.showWarningMessage('找不到檔案');
       return;
@@ -44,7 +45,42 @@ export function activate(context: vscode.ExtensionContext) {
           enableScripts: true,
           localResourceRoots: [vscode.Uri.file(path.join(context.extensionPath, 'media'))]
         }
-      );
+      );// end of assign panel
+
+      // 用來分辨前端渲染完成了沒
+      let webviewReady = false;
+
+      // ✅ 接收 Webview 傳來的「準備好了」訊號
+      // 1) 前端準備好時開 flag、送初次 highlight
+      panel.webview.onDidReceiveMessage((message) => {
+        console.log('[EXT] 收到來自 Webview 的訊息:', message);
+
+        if (message.type === 'ready') {
+          webviewReady = true;
+
+          // 確保 panel 進到 function 的時候不是 undefined
+          if (!panel) { console.log('panel 抓不到'); return; };
+          if (!editorAtStart) { console.log('activeEditor 抓不到'); return; };
+
+          const initLine = editorAtStart.selection.active.line + 1;
+          panel.webview.postMessage({ type: 'highlight-line', line: initLine });
+          console.log('[EXT] Webview 已準備好，送出 highlight-line:', initLine);
+        }
+      });
+      
+      // 2) 只有在 webviewReady 之後才回應後續游標移動
+      const selListener = vscode.window.onDidChangeTextEditorSelection((event) => {
+        if (!webviewReady) {return;}// 如果前端還沒 'ready' 就不要繼續執行
+        if (!panel) { console.log('panel 抓不到'); return; };
+
+        const activeLine = event.selections[0].active.line + 1;
+        panel.webview.postMessage({ type: 'highlight-line', line: activeLine });
+        console.log('[EXT] 偵測行變化，送出 highlight-line:', activeLine);
+      });
+      // 回傳值（Disposable）存到 context.subscriptions，
+      // 這樣就能確保你的事件 listener 在 extension 被停用或重載時，自動被釋放。
+      context.subscriptions.push(selListener);
+
 
       // 取得本地檔案路徑
       const mediaPath = path.join(context.extensionPath, 'media');
@@ -66,17 +102,6 @@ export function activate(context: vscode.ExtensionContext) {
       // console.log("HTML content:\n", panel.webview.html);
     });
 
-    // 傳送選取行數給 Webview
-    vscode.window.onDidChangeTextEditorSelection((event) => {
-        if (!panel) {return;}
-
-        const activeEditor = event.textEditor;
-        if (!activeEditor) {return;}
-
-        const activeLine = activeEditor.selection.active.line + 1;
-        console.log('傳送 highlight 指令行號:', activeLine);
-        panel.webview.postMessage({ type: 'highlight-line', line: activeLine });
-    });
   });
 
   context.subscriptions.push(disposable);
