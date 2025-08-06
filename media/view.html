@@ -333,16 +333,6 @@
         // 1) 渲染完成後呼叫，建立映射 { line: element } 
         function collectLineElementMap() {
             const map = {};
-            // document.querySelectorAll('g.element').forEach(g => {
-            //     // <tspan>line 5: ...</tspan>
-            //     const tspan = g.querySelector('tspan');
-            //     if (!tspan) return;
-            //     const m = tspan.textContent.match(/^line\s+(\d+):/);
-            //     if (m) {
-            //         const lineNum = parseInt(m[1], 10);
-            //         map[lineNum] = g;
-            //     }
-            // });
 
             // 1. 找到所有 SVG 里的 <text> 节点
             const texts = document.querySelectorAll('#canvas svg text');
@@ -393,6 +383,8 @@
             // // 清空所有 shape
             // document.querySelectorAll('#canvas svg rect, #canvas svg path')
             //     .forEach(el => el.setAttribute('fill', 'white'));
+            // 如果 set path to white，會遮到一部分 node
+
             // 清空所有 rect 的 highlight
             document.querySelectorAll('#canvas svg rect')
                 .forEach(el => el.setAttribute('fill', 'white'));
