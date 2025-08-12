@@ -21,6 +21,11 @@ export function activate(context: vscode.ExtensionContext) {
     // 執行修改過後的 "my_pyflowchart"
     const pyflowchartPath = path.join(context.extensionPath, 'my_pyflowchart', 'pyflowchart', '__main__.py');
     const cmd = `python "${pyflowchartPath}" "${pyFile}"`;
+    // const cmd = `python "${pyflowchartPath}" --simplify "${pyFile}"`;
+    // test in command-line
+    // python .\my_pyflowchart\pyflowchart\__main__.py ..\test_space\test2.py
+    // python .\my_pyflowchart\pyflowchart\__main__.py ..\test_space\test.py
+    // python .\my_pyflowchart\pyflowchart\__main__.py "C:\Users\jeffl\Desktop\其他\vs code\coco\113_2_Machine_Learning\EX3\problem1.py"
     
     // 宣告 outter 的 panel 讓後面可以存取
     let panel: vscode.WebviewPanel | undefined = undefined;
