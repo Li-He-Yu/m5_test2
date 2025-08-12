@@ -1,5 +1,7 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
+import * as fs from 'fs';
+import * as os from 'os';
 import { spawn } from 'child_process';
 
 //儲存目前webview panel的reference
@@ -114,8 +116,7 @@ export function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(selectionDisposable);
 }
 
- //解析行號對應字符串
- 
+// 解析行號對應字符串
 function parseLineMapping(mappingStr: string): Map<number, string[]> {
     const map = new Map<number, string[]>();
     try {
@@ -135,9 +136,7 @@ function parseLineMapping(mappingStr: string): Map<number, string[]> {
     return map;
 }
 
-
-  //生成 Python AST 解析器類別
- 
+// 生成 Python AST 解析器類別
 function generatePythonASTClass(): string {
     const imports = () => `
 import ast
@@ -160,6 +159,7 @@ class FlowchartGenerator(ast.NodeVisitor):
         self.current_function = None
         self.branch_ends = []  
         self.pending_no_label = None
+        self.unreachable = False     # 新增：追蹤是否為不可達程式碼
         
         # 行號到節點ID的映射
         self.line_to_node = {}
@@ -255,7 +255,7 @@ class FlowchartGenerator(ast.NodeVisitor):
         self.mermaid_lines.append('    style End fill:#ffcdd2,stroke:#b71c1c,stroke-width:2px')
         
         # 處理可能的分支合併情況
-        if self.branch_ends and not self.current_node:
+        if self.branch_ends:
             for end_node_id in self.branch_ends:
                 if end_node_id:
                     if end_node_id == self.pending_no_label:
@@ -265,10 +265,17 @@ class FlowchartGenerator(ast.NodeVisitor):
                         self.add_edge(end_node_id, end_node)
             self.branch_ends = []
         elif self.current_node:
-            self.add_edge(self.current_node, end_node)
+            if self.current_node == self.pending_no_label:
+                self.add_edge(self.current_node, end_node, 'No')
+                self.pending_no_label = None
+            else:
+                self.add_edge(self.current_node, end_node)
     
     def visit_Import(self, node):
         """處理 import 語句"""
+        if self.current_node is None and not self.branch_ends:
+            return  # 不可達程式碼
+            
         node_id = self.get_next_id()
         import_names = ', '.join([alias.name for alias in node.names])
         self.add_node(node_id, f'import {import_names}', 'rectangle', 'fill:#fff3e0,stroke:#e65100,stroke-width:2px', node)
@@ -278,6 +285,9 @@ class FlowchartGenerator(ast.NodeVisitor):
     
     def visit_ImportFrom(self, node):
         """處理 from ... import ... 語句"""
+        if self.current_node is None and not self.branch_ends:
+            return  # 不可達程式碼
+            
         node_id = self.get_next_id()
         import_names = ', '.join([alias.name for alias in node.names])
         module = node.module or ''
@@ -323,6 +333,9 @@ class FlowchartGenerator(ast.NodeVisitor):
     
     def visit_ClassDef(self, node):
         """處理類別定義"""
+        if self.current_node is None and not self.branch_ends:
+            return  # 不可達程式碼
+            
         node_id = self.get_next_id()
         self.add_node(node_id, f'Class: {node.name}', 'rectangle','fill:#f3e5f5,stroke:#4a148c,stroke-width:2px', node)
         if self.current_node:
@@ -331,6 +344,9 @@ class FlowchartGenerator(ast.NodeVisitor):
     
     def visit_If(self, node):
         """處理 if 語句"""
+        if self.current_node is None and not self.branch_ends:
+            return  # 不可達程式碼
+            
         if_id = self.get_next_id()
         
         condition = self.get_source_segment(node.test)
@@ -448,6 +464,13 @@ class FlowchartGenerator(ast.NodeVisitor):
         last_stmt = body[-1]
         return isinstance(last_stmt, (ast.Return, ast.Break))
     
+    def ends_with_continue(self, body):
+        """檢查代碼塊是否以 continue 語句結束"""
+        if not body:
+            return False
+        last_stmt = body[-1]
+        return isinstance(last_stmt, ast.Continue)
+    
     def fix_last_edge_label(self, from_node, label):
         """修正最後一條從指定節點出發的邊的標籤"""
         for i in range(len(self.mermaid_lines) - 1, -1, -1):
@@ -457,6 +480,9 @@ class FlowchartGenerator(ast.NodeVisitor):
     
     def visit_For(self, node):
         """處理 for 迴圈（支援 break/continue）"""
+        if self.current_node is None and not self.branch_ends:
+            return  # 不可達程式碼
+            
         for_id = self.get_next_id()
         
         target = self.get_source_segment(node.target)
@@ -486,26 +512,58 @@ class FlowchartGenerator(ast.NodeVisitor):
         # 儲存當前狀態
         old_branch_ends = self.branch_ends[:]
         self.branch_ends = []
+        break_nodes = []  # 收集 break 節點
         
         self.current_node = for_id
         for stmt in node.body:
             self.visit(stmt)
+            # 如果遇到 break，收集 break 節點
+            if self.branch_ends and not self.current_node:
+                break_nodes.extend(self.branch_ends)
+                self.branch_ends = []
+                # 重要：設置 current_node 為 None，確保後續語句被識別為可達
+                self.current_node = None
         
-        # 如果迴圈體正常結束（沒有 break），連接回迴圈開始
+        # 如果迴圈體正常結束（沒有 break/continue 導致 current_node 為 None），連接回迴圈開始
         if self.current_node and self.current_node != for_id:
             self.add_edge(self.current_node, for_id)
         
         # 從堆疊中移除迴圈節點
         self.loop_stack.pop()
         
-        # 設置 for 迴圈後的流程
-        self.current_node = for_id
-        
-        # 恢復 branch_ends
-        self.branch_ends = old_branch_ends
+        # 處理迴圈後的流程
+        if break_nodes:
+            # 如果有 break，這些節點將繼續執行迴圈後的程式碼
+            # 檢查是否在另一個迴圈內
+            if self.loop_stack:
+                # 在巢狀迴圈中，break 後回到外層迴圈
+                parent_loop = self.loop_stack[-1]
+                for break_node in break_nodes:
+                    self.add_edge(break_node, parent_loop)
+                # 設置 current_node 為 None，表示這個迴圈路徑已結束
+                self.current_node = None
+            else:
+                # 不在其他迴圈內，break 節點會成為後續程式的起點
+                self.current_node = None
+                self.branch_ends = break_nodes + [for_id]
+        else:
+            # 沒有 break，正常的 for 迴圈結束
+            # 檢查是否在另一個迴圈內
+            if self.loop_stack:
+                # 在巢狀迴圈中，迴圈結束後回到外層迴圈
+                parent_loop = self.loop_stack[-1]
+                self.add_edge(for_id, parent_loop)
+                self.current_node = None
+            else:
+                # 不在其他迴圈內，for_id 成為下一個語句的起點
+                self.current_node = for_id
+                self.branch_ends = old_branch_ends
     
     def visit_While(self, node):
         """處理 while 迴圈（支援 break/continue）"""
+        if self.current_node is None and not self.branch_ends:
+            return  # 不可達程式碼
+            
         while_id = self.get_next_id()
         
         condition = self.get_source_segment(node.test)
@@ -555,6 +613,9 @@ class FlowchartGenerator(ast.NodeVisitor):
     
     def visit_Return(self, node):
         """處理 return 語句"""
+        if self.current_node is None and not self.branch_ends:
+            return  # 不可達程式碼
+            
         node_id = self.get_next_id()
         
         if node.value:
@@ -581,6 +642,9 @@ class FlowchartGenerator(ast.NodeVisitor):
     
     def visit_Break(self, node):
         """處理 break 語句"""
+        if self.current_node is None and not self.branch_ends:
+            return  # 不可達程式碼
+            
         node_id = self.get_next_id()
         self.add_node(node_id, 'break', 'rounded','fill:#ffccbc,stroke:#d84315,stroke-width:2px', node)
         
@@ -588,6 +652,7 @@ class FlowchartGenerator(ast.NodeVisitor):
             self.add_edge(self.current_node, node_id)
         
         # 將此節點加入 branch_ends 以便迴圈處理
+        # break 節點會在 visit_For 或 visit_While 中被收集
         self.branch_ends.append(node_id)
         
         # break 會跳出迴圈，所以設置 current_node 為 None
@@ -595,6 +660,9 @@ class FlowchartGenerator(ast.NodeVisitor):
     
     def visit_Continue(self, node):
         """處理 continue 語句"""
+        if self.current_node is None and not self.branch_ends:
+            return  # 不可達程式碼
+            
         node_id = self.get_next_id()
         self.add_node(node_id, 'continue', 'rounded','fill:#ffe0b2,stroke:#ef6c00,stroke-width:2px', node)
         
@@ -612,6 +680,9 @@ class FlowchartGenerator(ast.NodeVisitor):
     
     def visit_Pass(self, node):
         """處理 pass 語句"""
+        if self.current_node is None and not self.branch_ends:
+            return  # 不可達程式碼
+            
         node_id = self.get_next_id()
         self.add_node(node_id, 'pass', 'rectangle','fill:#f5f5f5,stroke:#9e9e9e,stroke-width:1px,stroke-dasharray:5,5', node)
         
@@ -622,6 +693,9 @@ class FlowchartGenerator(ast.NodeVisitor):
     
     def visit_Assert(self, node):
         """處理 assert 語句"""
+        if self.current_node is None and not self.branch_ends:
+            return  # 不可達程式碼
+            
         node_id = self.get_next_id()
         
         condition = self.get_source_segment(node.test)
@@ -641,6 +715,9 @@ class FlowchartGenerator(ast.NodeVisitor):
     
     def visit_Global(self, node):
         """處理 global 語句"""
+        if self.current_node is None and not self.branch_ends:
+            return  # 不可達程式碼
+            
         node_id = self.get_next_id()
         global_vars = ', '.join(node.names)
         self.add_node(node_id, f'global {global_vars}', 'rectangle','fill:#e8f5e9,stroke:#388e3c,stroke-width:1px,stroke-dasharray:3,3', node)
@@ -652,6 +729,9 @@ class FlowchartGenerator(ast.NodeVisitor):
     
     def visit_Nonlocal(self, node):
         """處理 nonlocal 語句"""
+        if self.current_node is None and not self.branch_ends:
+            return  # 不可達程式碼
+            
         node_id = self.get_next_id()
         nonlocal_vars = ', '.join(node.names)
         self.add_node(node_id, f'nonlocal {nonlocal_vars}', 'rectangle','fill:#e3f2fd,stroke:#1976d2,stroke-width:1px,stroke-dasharray:3,3', node)
@@ -663,32 +743,43 @@ class FlowchartGenerator(ast.NodeVisitor):
     
     def visit_Expr(self, node):
         """處理表達式語句"""
-        if self.branch_ends and not self.current_node:
-            if isinstance(node.value, ast.Call):
-                call_node = node.value
-                node_id = self.get_next_id()
+        # 檢查是否為不可達程式碼
+        if self.current_node is None and not self.branch_ends:
+            return  # 不可達程式碼，直接返回
+        
+        if isinstance(node.value, ast.Call):
+            call_node = node.value
+            node_id = self.get_next_id()
+            
+            if isinstance(call_node.func, ast.Name):
+                func_name = call_node.func.id
                 
-                if isinstance(call_node.func, ast.Name):
-                    func_name = call_node.func.id
-                    
-                    if func_name == 'print':
-                        args = ', '.join([self.get_source_segment(arg) for arg in call_node.args])
-                        self.add_node(node_id, f'print({args})', 'parallelogram','fill:#f3e5f5,stroke:#6a1b9a,stroke-width:2px', node)
-                    elif func_name == 'input':
-                        args = ', '.join([self.get_source_segment(arg) for arg in call_node.args])
-                        self.add_node(node_id, f'input({args})', 'parallelogram','fill:#e8eaf6,stroke:#283593,stroke-width:2px', node)
-                    else:
-                        args = ', '.join([self.get_source_segment(arg) for arg in call_node.args])
-                        self.add_node(node_id, f'Call {func_name}({args})', 'rectangle','fill:#fce4ec,stroke:#880e4f,stroke-width:3px', node)
-                        
-                        if func_name in self.function_defs:
-                            self.add_dotted_edge(node_id, self.function_defs[func_name])
-                elif isinstance(call_node.func, ast.Attribute):
-                    method_name = call_node.func.attr
-                    obj = self.get_source_segment(call_node.func.value)
+                if func_name == 'print':
                     args = ', '.join([self.get_source_segment(arg) for arg in call_node.args])
-                    self.add_node(node_id, f'{obj}.{method_name}({args})', 'rectangle','fill:#fce4ec,stroke:#880e4f,stroke-width:2px', node)
-                
+                    self.add_node(node_id, f'print({args})', 'parallelogram','fill:#f3e5f5,stroke:#6a1b9a,stroke-width:2px', node)
+                    
+                    for arg in call_node.args:
+                        if isinstance(arg, ast.Call) and isinstance(arg.func, ast.Name):
+                            called_func = arg.func.id
+                            if called_func in self.function_defs:
+                                self.add_dotted_edge(node_id, self.function_defs[called_func])
+                elif func_name == 'input':
+                    args = ', '.join([self.get_source_segment(arg) for arg in call_node.args])
+                    self.add_node(node_id, f'input({args})', 'parallelogram','fill:#e8eaf6,stroke:#283593,stroke-width:2px', node)
+                else:
+                    args = ', '.join([self.get_source_segment(arg) for arg in call_node.args])
+                    self.add_node(node_id, f'Call {func_name}({args})', 'rectangle','fill:#fce4ec,stroke:#880e4f,stroke-width:3px', node)
+                    
+                    if func_name in self.function_defs:
+                        self.add_dotted_edge(node_id, self.function_defs[func_name])
+            elif isinstance(call_node.func, ast.Attribute):
+                method_name = call_node.func.attr
+                obj = self.get_source_segment(call_node.func.value)
+                args = ', '.join([self.get_source_segment(arg) for arg in call_node.args])
+                self.add_node(node_id, f'{obj}.{method_name}({args})', 'rectangle','fill:#fce4ec,stroke:#880e4f,stroke-width:2px', node)
+            
+            # 處理連接
+            if self.branch_ends and not self.current_node:
                 for end_node in self.branch_ends:
                     if end_node:
                         if end_node == self.pending_no_label:
@@ -696,52 +787,22 @@ class FlowchartGenerator(ast.NodeVisitor):
                             self.pending_no_label = None
                         else:
                             self.add_edge(end_node, node_id)
-                
                 self.branch_ends = []
-                self.current_node = node_id
-        else:
-            if isinstance(node.value, ast.Call):
-                call_node = node.value
-                node_id = self.get_next_id()
-                
-                if isinstance(call_node.func, ast.Name):
-                    func_name = call_node.func.id
-                    
-                    if func_name == 'print':
-                        args = ', '.join([self.get_source_segment(arg) for arg in call_node.args])
-                        self.add_node(node_id, f'print({args})', 'parallelogram','fill:#f3e5f5,stroke:#6a1b9a,stroke-width:2px', node)
-                        
-                        for arg in call_node.args:
-                            if isinstance(arg, ast.Call) and isinstance(arg.func, ast.Name):
-                                called_func = arg.func.id
-                                if called_func in self.function_defs:
-                                    self.add_dotted_edge(node_id, self.function_defs[called_func])
-                    elif func_name == 'input':
-                        args = ', '.join([self.get_source_segment(arg) for arg in call_node.args])
-                        self.add_node(node_id, f'input({args})', 'parallelogram','fill:#e8eaf6,stroke:#283593,stroke-width:2px', node)
-                    else:
-                        args = ', '.join([self.get_source_segment(arg) for arg in call_node.args])
-                        self.add_node(node_id, f'Call {func_name}({args})', 'rectangle','fill:#fce4ec,stroke:#880e4f,stroke-width:3px', node)
-                        
-                        if func_name in self.function_defs:
-                            self.add_dotted_edge(node_id, self.function_defs[func_name])
-                elif isinstance(call_node.func, ast.Attribute):
-                    method_name = call_node.func.attr
-                    obj = self.get_source_segment(call_node.func.value)
-                    args = ', '.join([self.get_source_segment(arg) for arg in call_node.args])
-                    self.add_node(node_id, f'{obj}.{method_name}({args})', 'rectangle','fill:#fce4ec,stroke:#880e4f,stroke-width:2px', node)
-                
-                if self.current_node:
-                    if self.pending_no_label == self.current_node:
-                        self.add_edge(self.current_node, node_id, 'No')
-                        self.pending_no_label = None
-                    else:
-                        self.add_edge(self.current_node, node_id)
-                
-                self.current_node = node_id
+            elif self.current_node:
+                if self.pending_no_label == self.current_node:
+                    self.add_edge(self.current_node, node_id, 'No')
+                    self.pending_no_label = None
+                else:
+                    self.add_edge(self.current_node, node_id)
+            
+            self.current_node = node_id
     
     def visit_Assign(self, node):
         """處理賦值語句"""
+        # 檢查是否為不可達程式碼
+        if self.current_node is None and not self.branch_ends:
+            return  # 不可達程式碼
+            
         node_id = self.get_next_id()
         
         targets = ', '.join([self.get_source_segment(t) for t in node.targets])
@@ -777,6 +838,9 @@ class FlowchartGenerator(ast.NodeVisitor):
     
     def visit_AugAssign(self, node):
         """處理增強賦值語句+=, -=等等"""
+        if self.current_node is None and not self.branch_ends:
+            return  # 不可達程式碼
+            
         node_id = self.get_next_id()
         
         target = self.get_source_segment(node.target)
@@ -792,6 +856,9 @@ class FlowchartGenerator(ast.NodeVisitor):
     
     def visit_Try(self, node):
         """處理 try-except 語句"""
+        if self.current_node is None and not self.branch_ends:
+            return  # 不可達程式碼
+            
         try_id = self.get_next_id()
         self.add_node(try_id, 'try-except', 'rectangle','fill:#fff9c4,stroke:#f57c00,stroke-width:2px', node)
         
@@ -834,7 +901,6 @@ class FlowchartGenerator(ast.NodeVisitor):
             elements = ', '.join([self.get_source_segment(e) for e in node.elts])
             return f'[{elements}]'
         elif isinstance(node, ast.ListComp):
-            
             # 處理列表推導式
             elt = self.get_source_segment(node.elt)
             comp = node.generators[0]
@@ -886,7 +952,6 @@ class FlowchartGenerator(ast.NodeVisitor):
  * 生成 Python 主程式
  */
 function generatePythonMain(code: string): string {
-    
     const escapedCode = code
         .replace(/\\/g, '\\\\')
         .replace(/'''/g, "\\'''")
@@ -943,44 +1008,99 @@ function parsePythonWithAST(code: string): Promise<{mermaidCode: string, lineMap
     return new Promise((resolve, reject) => {
         const pythonScript = generatePythonASTClass() + generatePythonMain(code);
         
-        const python = spawn('python', ['-c', pythonScript]);
+        // 創建臨時文件來避免命令行長度限制
+        const tempDir = os.tmpdir();
+        const tempScriptPath = path.join(tempDir, `vscode_flowchart_${Date.now()}.py`);
         
-        let output = '';
-        let error = '';
+        try {
+            // 寫入臨時Python文件
+            fs.writeFileSync(tempScriptPath, pythonScript, 'utf8');
+        } catch (writeError) {
+            reject(new Error(`Failed to create temporary file: ${writeError}`));
+            return;
+        }
         
-        python.stdout.on('data', (data) => {
-            output += data.toString();
-        });
+        // 嘗試多個可能的 Python 命令
+        const pythonCommands = ['python3', 'python', 'py'];
+        let currentCommandIndex = 0;
         
-        python.stderr.on('data', (data) => {
-            const errorStr = data.toString();
-            error += errorStr;
-            // 輸出所有調試信息到 console
-            console.log('Python stderr:', errorStr);
-        });
-        
-        python.on('close', (exitCode) => {
-            if (exitCode !== 0) {
-                console.error('Python script failed with exit code:', exitCode);
-                console.error('Full error output:', error);
-                reject(new Error(error || 'Python script failed'));
-            } else {
-                const parts = output.trim().split('---LINE_MAPPING---');
-                const mermaidCode = parts[0].trim();
-                const lineMapping = parts[1]?.trim() || '{}';
-                
-                console.log('Raw Python output line mapping:', lineMapping);
-                
-                resolve({
-                    mermaidCode: mermaidCode,
-                    lineMapping: lineMapping
-                });
+        function cleanupAndReject(error: Error) {
+            try {
+                fs.unlinkSync(tempScriptPath);
+            } catch (cleanupError) {
+                console.error('Failed to cleanup temp file:', cleanupError);
             }
-        });
+            reject(error);
+        }
         
-        python.on('error', (err) => {
-            reject(new Error(`Failed to spawn Python: ${err.message}`));
-        });
+        function cleanupAndResolve(result: {mermaidCode: string, lineMapping: string}) {
+            try {
+                fs.unlinkSync(tempScriptPath);
+            } catch (cleanupError) {
+                console.error('Failed to cleanup temp file:', cleanupError);
+            }
+            resolve(result);
+        }
+        
+        function tryNextPython() {
+            if (currentCommandIndex >= pythonCommands.length) {
+                cleanupAndReject(new Error('Python not found. Please install Python 3.x or add it to your PATH. Tried: ' + pythonCommands.join(', ')));
+                return;
+            }
+            
+            const pythonCmd = pythonCommands[currentCommandIndex];
+            console.log(`Trying Python command: ${pythonCmd}`);
+            
+            // 使用臨時文件而不是 -c 參數
+            const python = spawn(pythonCmd, [tempScriptPath]);
+            
+            let output = '';
+            let error = '';
+            
+            python.stdout.on('data', (data) => {
+                output += data.toString();
+            });
+            
+            python.stderr.on('data', (data) => {
+                const errorStr = data.toString();
+                error += errorStr;
+                // 輸出所有調試信息到 console
+                console.log('Python stderr:', errorStr);
+            });
+            
+            python.on('close', (exitCode) => {
+                if (exitCode !== 0) {
+                    console.error(`${pythonCmd} script failed with exit code:`, exitCode);
+                    console.error('Full error output:', error);
+                    
+                    // 如果當前Python命令失敗，嘗試下一個
+                    currentCommandIndex++;
+                    tryNextPython();
+                } else {
+                    const parts = output.trim().split('---LINE_MAPPING---');
+                    const mermaidCode = parts[0].trim();
+                    const lineMapping = parts[1]?.trim() || '{}';
+                    
+                    console.log('Raw Python output line mapping:', lineMapping);
+                    
+                    cleanupAndResolve({
+                        mermaidCode: mermaidCode,
+                        lineMapping: lineMapping
+                    });
+                }
+            });
+            
+            python.on('error', (err) => {
+                console.error(`Failed to spawn ${pythonCmd}:`, err.message);
+                
+                // 如果spawn失敗（通常是找不到命令），嘗試下一個
+                currentCommandIndex++;
+                tryNextPython();
+            });
+        }
+        
+        // 開始嘗試第一個Python命令
+        tryNextPython();
     });
 }
 
