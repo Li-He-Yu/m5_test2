@@ -10,6 +10,9 @@ let currentPanel: vscode.WebviewPanel | undefined;
 //儲存行號到節點ID的對應關係
 let lineToNodeMap: Map<number, string[]> = new Map();
 
+//儲存所有節點的順序（新增）
+let nodeOrder: string[] = [];
+
 export function activate(context: vscode.ExtensionContext) {
     
     let generateDisposable = vscode.commands.registerCommand('m5-test2.generate', async () => {
@@ -29,15 +32,20 @@ export function activate(context: vscode.ExtensionContext) {
         
         try {
             //使用 Python AST 來解析程式碼，並獲取每一行的對應關係
-            const { mermaidCode, lineMapping } = await parsePythonWithAST(code);
+            const { mermaidCode, lineMapping, nodeSequence } = await parsePythonWithAST(code);
             
             console.log('Generated Mermaid code:');
             console.log(mermaidCode);
             console.log('Line mapping:', lineMapping);
+            console.log('Node sequence:', nodeSequence);
             
             //解析每一行的對應關系
             lineToNodeMap = parseLineMapping(lineMapping);
             console.log('Parsed line to node map:', Array.from(lineToNodeMap.entries()));
+            
+            //解析節點順序（新增）
+            nodeOrder = parseNodeSequence(nodeSequence);
+            console.log('Node order:', nodeOrder);
             
             //創建或更新 Webview 面板
             if (currentPanel) {
@@ -58,13 +66,20 @@ export function activate(context: vscode.ExtensionContext) {
                 });
             }
 
-            currentPanel.webview.html = getWebviewContent(mermaidCode);
+            currentPanel.webview.html = getWebviewContent(mermaidCode, nodeOrder);
             
-            //監聽來自 webview 的消息（這個保留但不會用到）
+            //監聽來自 webview 的消息
             currentPanel.webview.onDidReceiveMessage(
                 message => {
                     switch (message.command) {
                         case 'nodeClicked':
+                            break;
+                        case 'requestNodeOrder':
+                            // 回傳節點順序給 webview（新增）
+                            currentPanel?.webview.postMessage({
+                                command: 'setNodeOrder',
+                                nodeOrder: nodeOrder
+                            });
                             break;
                     }
                 },
@@ -77,7 +92,7 @@ export function activate(context: vscode.ExtensionContext) {
         }
     });
 
-    //註冊游標位置變化的資訊
+    //游標位置變化的資訊
     let selectionDisposable = vscode.window.onDidChangeTextEditorSelection((e) => {
         if (!currentPanel) {
             return;
@@ -98,7 +113,7 @@ export function activate(context: vscode.ExtensionContext) {
         const nodeIds = lineToNodeMap.get(lineNumber);
         if (nodeIds && nodeIds.length > 0) {
             console.log('Found nodes for line', lineNumber, ':', nodeIds);
-            // 發送消息到webview並將該節點發光，bling bling這樣
+            //發送消息到webview並將該節點發光，bling bling這樣
             currentPanel.webview.postMessage({
                 command: 'highlightNodes',
                 nodeIds: nodeIds
@@ -136,6 +151,17 @@ function parseLineMapping(mappingStr: string): Map<number, string[]> {
     return map;
 }
 
+// 解析節點順序（新增）
+function parseNodeSequence(sequenceStr: string): string[] {
+    try {
+        const sequence = JSON.parse(sequenceStr);
+        return sequence as string[];
+    } catch (e) {
+        console.error('Error parsing node sequence:', e);
+        return [];
+    }
+}
+
 // 生成 Python AST 解析器類別
 function generatePythonASTClass(): string {
     const imports = () => `
@@ -159,14 +185,13 @@ class FlowchartGenerator(ast.NodeVisitor):
         self.current_function = None
         self.branch_ends = []  
         self.pending_no_label = None
-        self.unreachable = False     # 新增：追蹤是否為不可達程式碼
+        self.unreachable = False     #追蹤是否為不可達程式碼
+        self.line_to_node = {}       # python code到flowchart區塊的對應關係
+        self.node_sequence = []      # 節點執行順序
         
-        # 行號到節點ID的映射
-        self.line_to_node = {}
-        
-        # 添加開始節點
         self.mermaid_lines.append('    Start([Start])')
         self.mermaid_lines.append('    style Start fill:#c8e6c9,stroke:#1b5e20,stroke-width:2px')
+        self.node_sequence.append('Start')  # 記錄開始節點
 `;
 
     const helperMethods = () => `
@@ -199,6 +224,10 @@ class FlowchartGenerator(ast.NodeVisitor):
         # 添加行號映射
         if source_node:
             self.add_line_mapping(source_node, node_id)
+        
+        # 記錄節點順序（新增）
+        if node_id not in self.node_sequence:
+            self.node_sequence.append(node_id)
         
         if shape == 'rectangle':
             self.mermaid_lines.append(f'    {node_id}["{escaped_label}"]')
@@ -253,6 +282,10 @@ class FlowchartGenerator(ast.NodeVisitor):
         end_node = 'End'
         self.mermaid_lines.append('    End([End])')
         self.mermaid_lines.append('    style End fill:#ffcdd2,stroke:#b71c1c,stroke-width:2px')
+        
+        # 記錄結束節點（新增）
+        if end_node not in self.node_sequence:
+            self.node_sequence.append(end_node)
         
         # 處理可能的分支合併情況
         if self.branch_ends:
@@ -397,7 +430,7 @@ class FlowchartGenerator(ast.NodeVisitor):
                     self.branch_ends.append(self.current_node)
         else:
             # 沒有 else 分支的情況
-            # 重要：設置 current_node 為 if_id，讓後續的語句能從 No 分支連接
+            # 設置 current_node 為 if_id讓後續的語句能從 No 分支連接
             self.current_node = if_id
             self.pending_no_label = if_id
             # 不要將 if_id 加入 branch_ends
@@ -479,7 +512,7 @@ class FlowchartGenerator(ast.NodeVisitor):
                 break
     
     def visit_For(self, node):
-        """處理 for 迴圈（支援 break/continue）"""
+        """處理 for 迴圈（支援 break/continue)"""
         if self.current_node is None and not self.branch_ends:
             return  # 不可達程式碼
             
@@ -506,7 +539,7 @@ class FlowchartGenerator(ast.NodeVisitor):
             else:
                 self.add_edge(self.current_node, for_id)
         
-        # 將迴圈節點加入堆疊（用於 break/continue）
+        # 將迴圈節點加入堆疊（用於 break/continue)
         self.loop_stack.append(for_id)
         
         # 儲存當前狀態
@@ -517,14 +550,14 @@ class FlowchartGenerator(ast.NodeVisitor):
         self.current_node = for_id
         for stmt in node.body:
             self.visit(stmt)
-            # 如果遇到 break，收集 break 節點
+            # 如果遇到 break收集 break 節點
             if self.branch_ends and not self.current_node:
                 break_nodes.extend(self.branch_ends)
                 self.branch_ends = []
-                # 重要：設置 current_node 為 None，確保後續語句被識別為可達
+                # 重要：設置 current_node 為 None確保後續語句被識別為可達
                 self.current_node = None
         
-        # 如果迴圈體正常結束（沒有 break/continue 導致 current_node 為 None），連接回迴圈開始
+        # 如果迴圈體正常結束（沒有 break/continue 導致 current_node 為 None)連接回迴圈開始
         if self.current_node and self.current_node != for_id:
             self.add_edge(self.current_node, for_id)
         
@@ -533,21 +566,21 @@ class FlowchartGenerator(ast.NodeVisitor):
         
         # 處理迴圈後的流程
         if break_nodes:
-            # 如果有 break，這些節點將繼續執行迴圈後的程式碼
+            # 如果有 break這些節點將繼續執行迴圈後的程式碼
             # 檢查是否在另一個迴圈內
             if self.loop_stack:
-                # 在巢狀迴圈中，break 後回到外層迴圈
+                # 在巢狀迴圈中break 後回到外層迴圈
                 parent_loop = self.loop_stack[-1]
                 for break_node in break_nodes:
                     self.add_edge(break_node, parent_loop)
-                # 設置 current_node 為 None，表示這個迴圈路徑已結束
+                # 設置 current_node 為 None表示這個迴圈路徑已結束
                 self.current_node = None
             else:
-                # 不在其他迴圈內，break 節點會成為後續程式的起點
+                # 不在其他迴圈內 break 節點會成為後續程式的起點
                 self.current_node = None
                 self.branch_ends = break_nodes + [for_id]
         else:
-            # 沒有 break，正常的 for 迴圈結束
+            # 沒有 break正常的 for 迴圈結束
             # 檢查是否在另一個迴圈內
             if self.loop_stack:
                 # 在巢狀迴圈中，迴圈結束後回到外層迴圈
@@ -555,12 +588,12 @@ class FlowchartGenerator(ast.NodeVisitor):
                 self.add_edge(for_id, parent_loop)
                 self.current_node = None
             else:
-                # 不在其他迴圈內，for_id 成為下一個語句的起點
+                # 不在其他迴圈內for_id 成為下一個語句的起點
                 self.current_node = for_id
                 self.branch_ends = old_branch_ends
     
     def visit_While(self, node):
-        """處理 while 迴圈（支援 break/continue）"""
+        """處理 while 迴圈（支援 break/continue)"""
         if self.current_node is None and not self.branch_ends:
             return  # 不可達程式碼
             
@@ -572,7 +605,7 @@ class FlowchartGenerator(ast.NodeVisitor):
         if self.current_node:
             self.add_edge(self.current_node, while_id)
         
-        # 將迴圈節點加入堆疊（用於 break/continue）
+        # 將迴圈節點加入堆疊（用於 break/continue)
         self.loop_stack.append(while_id)
         
         # 儲存當前狀態
@@ -590,7 +623,7 @@ class FlowchartGenerator(ast.NodeVisitor):
             else:
                 self.visit(stmt)
         
-        # 如果迴圈體正常結束（沒有 break），連接回迴圈開始
+        # 如果迴圈體正常結束（沒有 break)連接回迴圈開始
         if self.current_node and self.current_node != while_id:
             self.add_edge(self.current_node, while_id)
         
@@ -598,16 +631,16 @@ class FlowchartGenerator(ast.NodeVisitor):
         self.loop_stack.pop()
         
         # 設置 while 迴圈後的流程
-        # 如果有 break，這些節點會成為後續程式的起點
+        # 如果有 break這些節點會成為後續程式的起點
         if self.branch_ends:
             # break 節點會繼續執行後面的程式碼
             # 不直接連接，而是將它們保留在 branch_ends 中
             self.current_node = None
         else:
-            # 沒有 break，正常的 while False 出口
+            # 沒有 break正常的 while False 出口
             self.current_node = while_id
         
-        # 恢復並合併 branch_ends（但保留 break 節點）
+        # 恢復並合併 branch_ends(但保留 break 節點）
         if not self.branch_ends:
             self.branch_ends = old_branch_ends
     
@@ -938,6 +971,10 @@ class FlowchartGenerator(ast.NodeVisitor):
     def get_line_mapping(self):
         """獲取行號到節點ID的映射"""
         return json.dumps(self.line_to_node)
+    
+    def get_node_sequence(self):
+        """獲取節點執行順序（新增）"""
+        return json.dumps(self.node_sequence)
 `;
 
     return [
@@ -983,8 +1020,15 @@ try:
     line_mapping = generator.get_line_mapping()
     print(line_mapping)
     
-    # 輸出詳細的映射信息到 stderr（用於調試）
+    print("---NODE_SEQUENCE---")
+    
+    # 輸出節點順序（新增）
+    node_sequence = generator.get_node_sequence()
+    print(node_sequence)
+    
+    # 錯誤測試
     print(f"Line mapping details: {generator.line_to_node}", file=sys.stderr)
+    print(f"Node sequence: {generator.node_sequence}", file=sys.stderr)
     
     # 檢查並顯示 AST 節點的實際行號
     for node in ast.walk(tree):
@@ -1004,7 +1048,7 @@ except Exception as e:
 }
 
 // 使用 Python 的 AST 模組來解析程式碼
-function parsePythonWithAST(code: string): Promise<{mermaidCode: string, lineMapping: string}> {
+function parsePythonWithAST(code: string): Promise<{mermaidCode: string, lineMapping: string, nodeSequence: string}> {
     return new Promise((resolve, reject) => {
         const pythonScript = generatePythonASTClass() + generatePythonMain(code);
         
@@ -1033,7 +1077,7 @@ function parsePythonWithAST(code: string): Promise<{mermaidCode: string, lineMap
             reject(error);
         }
         
-        function cleanupAndResolve(result: {mermaidCode: string, lineMapping: string}) {
+        function cleanupAndResolve(result: {mermaidCode: string, lineMapping: string, nodeSequence: string}) {
             try {
                 fs.unlinkSync(tempScriptPath);
             } catch (cleanupError) {
@@ -1079,13 +1123,19 @@ function parsePythonWithAST(code: string): Promise<{mermaidCode: string, lineMap
                 } else {
                     const parts = output.trim().split('---LINE_MAPPING---');
                     const mermaidCode = parts[0].trim();
-                    const lineMapping = parts[1]?.trim() || '{}';
+                    const afterMapping = parts[1]?.trim() || '{}';
+                    
+                    const secondParts = afterMapping.split('---NODE_SEQUENCE---');
+                    const lineMapping = secondParts[0].trim();
+                    const nodeSequence = secondParts[1]?.trim() || '[]';
                     
                     console.log('Raw Python output line mapping:', lineMapping);
+                    console.log('Raw Python output node sequence:', nodeSequence);
                     
                     cleanupAndResolve({
                         mermaidCode: mermaidCode,
-                        lineMapping: lineMapping
+                        lineMapping: lineMapping,
+                        nodeSequence: nodeSequence
                     });
                 }
             });
@@ -1104,8 +1154,29 @@ function parsePythonWithAST(code: string): Promise<{mermaidCode: string, lineMap
     });
 }
 
-// Webview 內容
-function getWebviewContent(mermaidCode: string): string {
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+// Webview 內容（修改以包含新按鈕和動畫功能）
+// Webview 內容（修正版本）
+function getWebviewContent(mermaidCode: string, nodeOrder: string[]): string {
     return `<!DOCTYPE html>
     <html lang="en">
     <head>
@@ -1129,6 +1200,7 @@ function getWebviewContent(mermaidCode: string): string {
                 margin: 20px 0;
                 display: flex;
                 gap: 10px;
+                flex-wrap: wrap;
             }
             button {
                 background-color: var(--vscode-button-background);
@@ -1140,6 +1212,22 @@ function getWebviewContent(mermaidCode: string): string {
             }
             button:hover {
                 background-color: var(--vscode-button-hoverBackground);
+            }
+            button:disabled {
+                opacity: 0.5;
+                cursor: not-allowed;
+            }
+            .animation-control {
+                background-color: #4CAF50;
+            }
+            .animation-control:hover {
+                background-color: #45a049;
+            }
+            .stop-button {
+                background-color: #f44336;
+            }
+            .stop-button:hover {
+                background-color: #da190b;
             }
             #mermaid-container {
                 background-color: white;
@@ -1177,6 +1265,15 @@ function getWebviewContent(mermaidCode: string): string {
                 animation: glow 1.5s infinite;
             }
             
+            /* 動畫高亮樣式 - 不同顏色 */
+            .animation-highlighted rect,
+            .animation-highlighted polygon,
+            .animation-highlighted ellipse,
+            .animation-highlighted path {
+                filter: drop-shadow(0 0 10px #00BCD4) drop-shadow(0 0 20px #00BCD4);
+                animation: animationGlow 1s infinite;
+            }
+            
             @keyframes glow {
                 0% {
                     filter: drop-shadow(0 0 5px #FFC107) drop-shadow(0 0 10px #FFC107);
@@ -1188,10 +1285,41 @@ function getWebviewContent(mermaidCode: string): string {
                     filter: drop-shadow(0 0 5px #FFC107) drop-shadow(0 0 10px #FFC107);
                 }
             }
+            
+            @keyframes animationGlow {
+                0% {
+                    filter: drop-shadow(0 0 5px #00BCD4) drop-shadow(0 0 10px #00BCD4);
+                }
+                50% {
+                    filter: drop-shadow(0 0 20px #00BCD4) drop-shadow(0 0 35px #00BCD4);
+                }
+                100% {
+                    filter: drop-shadow(0 0 5px #00BCD4) drop-shadow(0 0 10px #00BCD4);
+                }
+            }
+            
+            .speed-control {
+                display: flex;
+                align-items: center;
+                gap: 10px;
+                margin-top: 10px;
+            }
+            
+            .speed-slider {
+                width: 200px;
+            }
+            
+            .status-display {
+                margin-top: 10px;
+                padding: 10px;
+                background-color: var(--vscode-editor-inactiveSelectionBackground);
+                border-radius: 4px;
+                font-family: monospace;
+            }
         </style>
     </head>
     <body>
-        <h1> Python Code Flowchart</h1>
+        <h1> PseudoChart</h1>
         
         <div class="controls">
             <button onclick="zoomIn()"> Zoom In</button>
@@ -1199,6 +1327,18 @@ function getWebviewContent(mermaidCode: string): string {
             <button onclick="resetZoom()"> Reset</button>
             <button onclick="exportSVG()"> Export SVG</button>
             <button onclick="clearHighlight()"> Clear Highlight</button>
+            <button id="animateBtn" class="animation-control" onclick="startAnimation()">▶ Animate Flow</button>
+            <button id="stopBtn" class="stop-button" onclick="stopAnimation()" style="display: none;">⏹ Stop</button>
+        </div>
+        
+        <div class="speed-control">
+            <label for="speedSlider">Animation Speed:</label>
+            <input type="range" id="speedSlider" class="speed-slider" min="100" max="2000" value="500" step="100">
+            <span id="speedValue">500ms</span>
+        </div>
+        
+        <div id="statusDisplay" class="status-display" style="display: none;">
+            Current Node: <span id="currentNodeName">-</span>
         </div>
         
         <div id="mermaid-container">
@@ -1208,14 +1348,30 @@ function getWebviewContent(mermaidCode: string): string {
         </div>
         
         <div class="legend">
-            <h4>虛線箭頭 (- - ->) 加上 "calls" 表示函式呼叫關係</h4>
-            <h4> 點擊左側程式碼行，右側對應的流程圖節點會bling bling的</h4>
+            <h4> 功能說明：</h4>
+            <ul>
+                <li>虛線箭頭 (- - ->) 加上 "calls" 表示函式呼叫關係</li>
+                <li>點擊左側程式碼行，右側對應的流程圖節點會發光（黃色）</li>
+                <li>點擊 "Animate Flow" 按鈕，按順序展示程式執行流程（藍色發光）</li>
+                <li>調整 Animation Speed 滑桿來控制動畫速度</li>
+            </ul>
         </div>
         
         <script>
             const vscode = acquireVsCodeApi();
             let currentScale = 1;
             let currentHighlightedNodes = [];
+            let animationNodes = [];
+            let animationTimer = null;
+            let animationIndex = 0;
+            let nodeOrder = ${JSON.stringify(nodeOrder)};
+            
+            // 速度滑桿控制
+            const speedSlider = document.getElementById('speedSlider');
+            const speedValue = document.getElementById('speedValue');
+            speedSlider.addEventListener('input', (e) => {
+                speedValue.textContent = e.target.value + 'ms';
+            });
             
             mermaid.initialize({ 
                 startOnLoad: true,
@@ -1230,8 +1386,28 @@ function getWebviewContent(mermaidCode: string): string {
             
             // 當 Mermaid 完成渲染後設置
             mermaid.init(undefined, document.querySelector('.mermaid')).then(() => {
-                // 不需要設置點擊事件，因為現在是單向的（程式碼到流程圖）
+                console.log('Mermaid initialized, node order:', nodeOrder);
             });
+            
+            function findNodeElement(nodeId) {
+                const elements = document.querySelectorAll(\`.node\`);
+                for (const el of elements) {
+                    const elementId = el.id;
+                    if (elementId) {
+                        const idParts = elementId.split('-');
+                        if (idParts.length >= 2) {
+                            const extractedId = idParts[1];
+                            if (extractedId === nodeId || 
+                                (nodeId.startsWith('func_') && elementId.includes(nodeId)) ||
+                                (nodeId === 'Start' && elementId.includes('Start')) ||
+                                (nodeId === 'End' && elementId.includes('End'))) {
+                                return el;
+                            }
+                        }
+                    }
+                }
+                return null;
+            }
             
             function highlightNodes(nodeIds) {
                 //清除之前的高亮
@@ -1241,28 +1417,12 @@ function getWebviewContent(mermaidCode: string): string {
                 
                 //高亮新的節點
                 nodeIds.forEach(nodeId => {
-                    //查找：查找ID完全匹配或以nodeId-開頭的元素
-                    const elements = document.querySelectorAll(\`.node\`);
-                    elements.forEach(el => {
-                        //提取節點ID（通常是 flowchart-nodeX-XXX）
-                        const elementId = el.id;
-                        if (elementId) {
-                            // 檢查是否包含目標節點ID
-                            const idParts = elementId.split('-');
-                            if (idParts.length >= 2) {
-                                const extractedId = idParts[1];
-                                // 完全匹配節點ID或特殊節點（如func_fib, Start, End）
-                                if (extractedId === nodeId || 
-                                    (nodeId.startsWith('func_') && elementId.includes(nodeId)) ||
-                                    (nodeId === 'Start' && elementId.includes('Start')) ||
-                                    (nodeId === 'End' && elementId.includes('End'))) {
-                                    el.classList.add('highlighted');
-                                    currentHighlightedNodes.push(el);
-                                    console.log('Highlighted element:', elementId);
-                                }
-                            }
-                        }
-                    });
+                    const element = findNodeElement(nodeId);
+                    if (element) {
+                        element.classList.add('highlighted');
+                        currentHighlightedNodes.push(element);
+                        console.log('Highlighted element:', element.id);
+                    }
                 });
                 
                 if (currentHighlightedNodes.length === 0) {
@@ -1278,15 +1438,102 @@ function getWebviewContent(mermaidCode: string): string {
                 currentHighlightedNodes = [];
             }
             
+            function clearAnimationHighlight() {
+                // 移除所有動畫高亮
+                animationNodes.forEach(el => {
+                    el.classList.remove('animation-highlighted');
+                });
+                animationNodes = [];
+            }
+            
+            function animateNode(nodeId) {
+                clearAnimationHighlight();
+                
+                const element = findNodeElement(nodeId);
+                if (element) {
+                    element.classList.add('animation-highlighted');
+                    animationNodes.push(element);
+                    
+                    // 更新狀態顯示
+                    const statusDisplay = document.getElementById('statusDisplay');
+                    const currentNodeName = document.getElementById('currentNodeName');
+                    statusDisplay.style.display = 'block';
+                    
+                    // 從節點中提取文字內容
+                    const textElement = element.querySelector('text') || element.querySelector('.nodeLabel');
+                    if (textElement) {
+                        currentNodeName.textContent = nodeId + ': ' + textElement.textContent;
+                    } else {
+                        currentNodeName.textContent = nodeId;
+                    }
+                    
+                    // 滾動到當前節點
+                    element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                }
+            }
+            
+            function startAnimation() {
+                if (animationTimer) {
+                    stopAnimation();
+                }
+                
+                animationIndex = 0;
+                const animateBtn = document.getElementById('animateBtn');
+                const stopBtn = document.getElementById('stopBtn');
+                animateBtn.style.display = 'none';
+                stopBtn.style.display = 'inline-block';
+                
+                const speed = parseInt(speedSlider.value);
+                
+                function nextNode() {
+                    if (animationIndex < nodeOrder.length) {
+                        animateNode(nodeOrder[animationIndex]);
+                        animationIndex++;
+                        animationTimer = setTimeout(nextNode, speed);
+                    } else {
+                        // 動畫結束
+                        stopAnimation();
+                    }
+                }
+                
+                nextNode();
+            }
+            
+            function stopAnimation() {
+                if (animationTimer) {
+                    clearTimeout(animationTimer);
+                    animationTimer = null;
+                }
+                
+                clearAnimationHighlight();
+                
+                const animateBtn = document.getElementById('animateBtn');
+                const stopBtn = document.getElementById('stopBtn');
+                animateBtn.style.display = 'inline-block';
+                stopBtn.style.display = 'none';
+                
+                // 隱藏狀態顯示
+                const statusDisplay = document.getElementById('statusDisplay');
+                statusDisplay.style.display = 'none';
+            }
+            
             // 監聽來自擴展的消息
             window.addEventListener('message', event => {
                 const message = event.data;
                 switch (message.command) {
                     case 'highlightNodes':
+                        // 如果正在播放動畫，先停止
+                        if (animationTimer) {
+                            stopAnimation();
+                        }
                         highlightNodes(message.nodeIds);
                         break;
                     case 'clearHighlight':
                         clearHighlight();
+                        break;
+                    case 'setNodeOrder':
+                        nodeOrder = message.nodeOrder;
+                        console.log('Updated node order:', nodeOrder);
                         break;
                 }
             });
