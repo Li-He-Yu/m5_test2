@@ -14,6 +14,7 @@ let lineToNodeMap: Map<number, string[]> = new Map();
 let nodeOrder: string[] = [];
 
 export function activate(context: vscode.ExtensionContext) {
+    const HtmlTemplatePath = path.join(context.extensionPath, 'media', 'flowview.html');
     
     let generateDisposable = vscode.commands.registerCommand('m5-test2.generate', async () => {
         const editor = vscode.window.activeTextEditor;
@@ -1176,6 +1177,13 @@ function parsePythonWithAST(code: string): Promise<{mermaidCode: string, lineMap
 
 // Webview 內容（修改以包含新按鈕和動畫功能）
 // Webview 內容（修正版本）
+function getWebviewContent_from_templates(template_path: string, mermaidCode: string, nodeOrder: string[]): string {
+    let html = fs.readFileSync(template_path, 'utf-8');
+    // const escapedCode = JSON.stringify(flowchartCode);
+
+    return "driver_temp_code\n";
+}
+
 function getWebviewContent(mermaidCode: string, nodeOrder: string[]): string {
     return `<!DOCTYPE html>
     <html lang="en">
