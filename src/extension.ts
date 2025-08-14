@@ -31,7 +31,7 @@ export function activate(context: vscode.ExtensionContext) {
         
         try {
             //使用 Python AST 來解析程式碼，並獲取每一行的對應關係
-            const { mermaidCode, lineMapping, nodeSequence } = await parsePythonWithAST(code);
+            const { mermaidCode, lineMapping, nodeSequence, nodeMeta } = await parsePythonWithAST(code);
             
             console.log('Generated Mermaid code:');
             console.log(mermaidCode);
@@ -45,6 +45,45 @@ export function activate(context: vscode.ExtensionContext) {
             //解析節點順序（新增）
             nodeOrder = parseNodeSequence(nodeSequence);
             console.log('Node order:', nodeOrder);
+
+            // ---- Build derived maps from nodeMeta ----
+            const nodeMetaObj = parseNodeMeta(nodeMeta);
+
+            const nodeIdToLine = new Map<string, number | null>();
+            const nodeIdToLabel = new Map<string, string>();
+            const statementToNodeIds = new Map<string, string[]>();
+            const statementToLine = new Map<string, number | null>();
+
+            for (const [id, m] of Object.entries(nodeMetaObj)) {
+                nodeIdToLine.set(id, m.line ?? null);
+                nodeIdToLabel.set(id, m.label);
+
+                const list = statementToNodeIds.get(m.label) ?? [];
+                list.push(id);
+                statementToNodeIds.set(m.label, list);
+
+                if (!statementToLine.has(m.label)) {
+                    statementToLine.set(m.label, m.line ?? null);
+                }
+            }
+
+            // Ready-to-send, execution-ordered view (for LLM or whatever)
+            const orderedForLLM = nodeOrder.map((id, idx) => ({
+                order: idx,
+                nodeId: id,
+                line: nodeIdToLine.get(id) ?? null,
+                statement: nodeIdToLabel.get(id) ?? (id === 'Start' || id === 'End' ? id : '')
+            }));
+            console.log('orderedForLLM:', orderedForLLM);
+            // You can now serialize `orderedForLLM` or build any {statement: lineno} list, etc.
+
+            async function analyzeWithLLM(ordered: typeof orderedForLLM, fullCode: string) {
+                const payload = {
+                    code: fullCode,
+                    executionTrace: ordered, // already ordered and labeled
+                };
+                // call your LLM here…
+            }
             
             //創建或更新 Webview 面板
             if (currentPanel) {
@@ -169,6 +208,17 @@ function parseNodeSequence(sequenceStr: string): string[] {
     }
 }
 
+type NodeMeta = Record<string, { 
+    label: string;
+    escaped_label: string; 
+    line: number | null 
+}>;
+
+function parseNodeMeta(metaStr: string): NodeMeta {
+  try { return JSON.parse(metaStr) as NodeMeta; }
+  catch (e) { console.error('Error parsing node meta:', e); return {}; }
+}
+
 // 生成 Python AST 解析器類別
 function generatePythonASTClass(): string {
     const imports = () => `
@@ -183,6 +233,7 @@ class FlowchartGenerator(ast.NodeVisitor):
     
     def __init__(self):
         self.node_id = 0
+        self.node_meta = {}          # nodeId -> { "label": str, "escaped_label": str, "line": int|None }
         self.mermaid_lines = ['flowchart TD']
         self.current_node = 'Start'  #開始的節點
         self.function_defs = {}      #存放function def的節點資訊
@@ -227,6 +278,14 @@ class FlowchartGenerator(ast.NodeVisitor):
     def add_node(self, node_id, label, shape='rectangle', style=None, source_node=None):
         """添加節點到 Mermaid 圖"""
         escaped_label = self.escape_text(label)
+
+        # record node_meta data
+        source_line = getattr(source_node, 'lineno', None)
+        self.node_meta[node_id] = {
+            "label": label,  # unescaped, for LLM / mapping
+            "escaped_label": escaped_label,  # what Mermaid uses
+            "line": source_line
+        }
         
         # 添加行號映射
         if source_node:
@@ -256,6 +315,10 @@ class FlowchartGenerator(ast.NodeVisitor):
         
         # 添加點擊事件
         self.mermaid_lines.append(f'    click {node_id} nodeClick')
+    
+    # getter of node meta data
+    def get_node_meta(self):
+        return json.dumps(self.node_meta)
     
     def add_edge(self, from_node, to_node, label=None):
         """添加邊到 Mermaid 圖"""
@@ -1032,6 +1095,10 @@ try:
     # 輸出節點順序（新增）
     node_sequence = generator.get_node_sequence()
     print(node_sequence)
+
+    # output the node meta data
+    print("---NODE_META---")
+    print(generator.get_node_meta())
     
     # 錯誤測試
     print(f"Line mapping details: {generator.line_to_node}", file=sys.stderr)
@@ -1055,7 +1122,12 @@ except Exception as e:
 }
 
 // 使用 Python 的 AST 模組來解析程式碼
-function parsePythonWithAST(code: string): Promise<{mermaidCode: string, lineMapping: string, nodeSequence: string}> {
+function parsePythonWithAST(code: string): Promise<{
+    mermaidCode: string, 
+    lineMapping: string, 
+    nodeSequence: string,
+    nodeMeta: string
+}> {
     return new Promise((resolve, reject) => {
         const pythonScript = generatePythonASTClass() + generatePythonMain(code);
         
@@ -1084,7 +1156,12 @@ function parsePythonWithAST(code: string): Promise<{mermaidCode: string, lineMap
             reject(error);
         }
         
-        function cleanupAndResolve(result: {mermaidCode: string, lineMapping: string, nodeSequence: string}) {
+        function cleanupAndResolve(result: {
+            mermaidCode: string, 
+            lineMapping: string, 
+            nodeSequence: string,
+            nodeMeta: string
+        }) {
             try {
                 fs.unlinkSync(tempScriptPath);
             } catch (cleanupError) {
@@ -1131,10 +1208,14 @@ function parsePythonWithAST(code: string): Promise<{mermaidCode: string, lineMap
                     const parts = output.trim().split('---LINE_MAPPING---');
                     const mermaidCode = parts[0].trim();
                     const afterMapping = parts[1]?.trim() || '{}';
-                    
+
                     const secondParts = afterMapping.split('---NODE_SEQUENCE---');
                     const lineMapping = secondParts[0].trim();
-                    const nodeSequence = secondParts[1]?.trim() || '[]';
+                    const afterSeq = secondParts[1]?.trim() || '[]';
+
+                    const thirdParts = afterSeq.split('---NODE_META---');
+                    const nodeSequence = thirdParts[0].trim();
+                    const nodeMeta = (thirdParts[1] ?? '{}').trim();
                     
                     console.log('Raw Python output line mapping:', lineMapping);
                     console.log('Raw Python output node sequence:', nodeSequence);
@@ -1142,7 +1223,8 @@ function parsePythonWithAST(code: string): Promise<{mermaidCode: string, lineMap
                     cleanupAndResolve({
                         mermaidCode: mermaidCode,
                         lineMapping: lineMapping,
-                        nodeSequence: nodeSequence
+                        nodeSequence: nodeSequence,
+                        nodeMeta: nodeMeta
                     });
                 }
             });
