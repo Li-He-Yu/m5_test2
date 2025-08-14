@@ -2,9 +2,21 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
+    <!-- Add a CSP meta (first <head> section), so inline scripts can run with a nonce in VS Code Webview -->
+    <meta http-equiv="Content-Security-Policy"
+      content="default-src 'none';
+               img-src %%CSP_SOURCE%% data:;
+               script-src 'nonce-%%NONCE%%';
+               style-src %%CSP_SOURCE%% 'unsafe-inline';
+               font-src %%CSP_SOURCE%%;">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Python Flowchart</title>
-    <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+    <!-- OLD -->
+    <!-- <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script> -->
+    <!-- NEW -->
+    <!-- turn into outter file, use placeholder, and replace when load into 'extension.ts' -->
+    <script nonce="%%NONCE%%" src="%%MERMAID_JS_URI%%"></script>
+
     <style>
         body {
             font-family: Arial, sans-serif;
@@ -163,9 +175,13 @@
         </div>
         
         <div id="mermaid-container">
-            <div class="mermaid" id="flowchart">
+            <!-- OLD -->
+            <!-- <div class="mermaid" id="flowchart">
                 ${mermaidCode}
-            </div>
+            </div> -->
+            <!-- NEW -->
+            <!-- turn into outter file, use placeholder, and replace when load into 'extension.ts' -->
+            <div class="mermaid" id="flowchart">%%MERMAID_CODE%%</div>
         </div>
         
         <div class="legend">
@@ -177,15 +193,34 @@
                 <li>調整 Animation Speed 滑桿來控制動畫速度</li>
             </ul>
         </div>
-        
-    <script>
+
+    <!-- OLD -->
+    <!-- <script> -->
+
+    <!-- NEW -->
+    <!-- turn into outter file, use placeholder, and replace when load into 'extension.ts' -->
+    <!-- all script need nonce tag to pass security limit in extension.ts -->
+    <!-- check comment of getNonce() in extension.ts -->
+    <script type="application/json" id="node-order-json" nonce="%%NONCE%%">%%NODE_ORDER_JSON%%</script>    
+    <script nonce="%%NONCE%%">
             const vscode = acquireVsCodeApi();
             let currentScale = 1;
             let currentHighlightedNodes = [];
             let animationNodes = [];
             let animationTimer = null;
             let animationIndex = 0;
-            let nodeOrder = ${JSON.stringify(nodeOrder)};
+            // <!-- OLD -->
+            // let nodeOrder = ${JSON.stringify(nodeOrder)};
+            // <!-- NEW -->
+            // <!-- turn into outter file, use placeholder, and replace when load into 'extension.ts' -->
+            const nodeOrderJsonTag = document.getElementById('node-order-json');
+            let nodeOrder = [];
+            try {
+                nodeOrder = JSON.parse(nodeOrderJsonTag?.textContent || '[]');
+            } catch (_) {
+                nodeOrder = [];
+            }
+
             
             // 速度滑桿控制
             const speedSlider = document.getElementById('speedSlider');
@@ -361,12 +396,14 @@
             
             function zoomIn() {
                 currentScale += 0.1;
-                document.querySelector('.mermaid').style.transform = 'scale(\${currentScale})';
+                // document.querySelector('.mermaid').style.transform = 'scale(\${currentScale})';
+                document.querySelector('.mermaid').style.transform = 'scale(' + currentScale + ')';
             }
             
             function zoomOut() {
                 currentScale = Math.max(0.5, currentScale - 0.1);
-                document.querySelector('.mermaid').style.transform = 'scale(\${currentScale})';
+                // document.querySelector('.mermaid').style.transform = 'scale(\${currentScale})';
+                document.querySelector('.mermaid').style.transform = 'scale(' + currentScale + ')';
             }
             
             function resetZoom() {

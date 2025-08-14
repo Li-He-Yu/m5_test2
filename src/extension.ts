@@ -14,7 +14,7 @@ let lineToNodeMap: Map<number, string[]> = new Map();
 let nodeOrder: string[] = [];
 
 export function activate(context: vscode.ExtensionContext) {
-    const HtmlTemplatePath = path.join(context.extensionPath, 'media', 'flowview.html');
+    // const HtmlTemplatePath = path.join(context.extensionPath, 'media', 'flowview.html');
     
     let generateDisposable = vscode.commands.registerCommand('m5-test2.generate', async () => {
         const editor = vscode.window.activeTextEditor;
@@ -58,7 +58,9 @@ export function activate(context: vscode.ExtensionContext) {
                     vscode.ViewColumn.Two,
                     {
                         enableScripts: true,
-                        retainContextWhenHidden: true
+                        retainContextWhenHidden: true,
+                        // Allow loading local files from your extension
+                        localResourceRoots: [vscode.Uri.joinPath(context.extensionUri, 'media')],
                     }
                 );
 
@@ -67,7 +69,13 @@ export function activate(context: vscode.ExtensionContext) {
                 });
             }
 
-            currentPanel.webview.html = getWebviewContent(mermaidCode, nodeOrder);
+            // currentPanel.webview.html = getWebviewContent(mermaidCode, nodeOrder);
+            currentPanel.webview.html = await getWebviewHtmlExternal(
+                currentPanel.webview,
+                context,
+                mermaidCode,
+                nodeOrder
+            );
             
             //監聽來自 webview 的消息
             currentPanel.webview.onDidReceiveMessage(
@@ -1172,16 +1180,52 @@ function parsePythonWithAST(code: string): Promise<{mermaidCode: string, lineMap
 
 
 
+// What is getNonce() and why we need it?
+// What: a tiny helper that generates a random string (the “nonce”).
+// Why: Your Webview uses a Content Security Policy (CSP) that blocks inline scripts unless they carry a matching nonce.
+// We put the same nonce in:
+// the CSP meta (script-src 'nonce-XYZ'), and
+// each <script nonce="XYZ"> tag.
+// This tells the Webview: “these inline scripts are allowed.”
+// A simple implementation in extension.ts:
+function getNonce(): string {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+  let nonce = '';
+  for (let i = 0; i < 32; i++) {nonce += chars.charAt(Math.floor(Math.random() * chars.length));}
+  return nonce;
+}
 
 
 
 // Webview 內容（修改以包含新按鈕和動畫功能）
 // Webview 內容（修正版本）
-function getWebviewContent_from_templates(template_path: string, mermaidCode: string, nodeOrder: string[]): string {
-    let html = fs.readFileSync(template_path, 'utf-8');
-    // const escapedCode = JSON.stringify(flowchartCode);
+// turn into load from 'media/flowview.html'
+async function getWebviewHtmlExternal(
+    webview: vscode.Webview,
+    context: vscode.ExtensionContext,
+    mermaidCode: string,
+    nodeOrder: string[]
+): Promise<string> {
+    // 1) read the template file
+    const templateUri = vscode.Uri.joinPath(context.extensionUri, 'media', 'flowview.html');
+    const bytes = await vscode.workspace.fs.readFile(templateUri);
+    let html = new TextDecoder('utf-8').decode(bytes);
 
-    return "driver_temp_code\n";
+    // 2) build URIs & nonce
+    const mermaidUri = webview.asWebviewUri(
+        vscode.Uri.joinPath(context.extensionUri, 'media', 'mermaid.min.js')
+    );
+    const nonce = getNonce();
+
+    // 3) replace placeholders
+    html = html
+        .replace(/%%CSP_SOURCE%%/g, webview.cspSource)
+        .replace(/%%NONCE%%/g, nonce)
+        .replace(/%%MERMAID_JS_URI%%/g, mermaidUri.toString())
+        .replace(/%%MERMAID_CODE%%/g, mermaidCode)
+        .replace(/%%NODE_ORDER_JSON%%/g, JSON.stringify(nodeOrder));
+
+    return html;
 }
 
 function getWebviewContent(mermaidCode: string, nodeOrder: string[]): string {
