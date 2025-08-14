@@ -3,19 +3,24 @@
 <head>
     <meta charset="UTF-8">
     <!-- Add a CSP meta (first <head> section), so inline scripts can run with a nonce in VS Code Webview -->
+    <!-- A nonce only allows inline scripts. It does not whitelist external scripts. Your mermaid URI is:-->
+    <!-- https://file+.vscode-resource.vscode-cdn.net/.../media/mermaid.min.js -->
+    <!-- For VS Code webviews, you must also allow the webview’s origin via %%CSP_SOURCE%%. -->
     <meta http-equiv="Content-Security-Policy"
-      content="default-src 'none';
-               img-src %%CSP_SOURCE%% data:;
-               script-src 'nonce-%%NONCE%%';
-               style-src %%CSP_SOURCE%% 'unsafe-inline';
-               font-src %%CSP_SOURCE%%;">
+        content="default-src 'none';
+            img-src %%CSP_SOURCE%% data:;
+            script-src %%CSP_SOURCE%% 'nonce-%%NONCE%%';
+            style-src %%CSP_SOURCE%% 'unsafe-inline';
+            font-src %%CSP_SOURCE%%;">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Python Flowchart</title>
-    <!-- OLD -->
-    <!-- <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script> -->
-    <!-- NEW -->
-    <!-- turn into outter file, use placeholder, and replace when load into 'extension.ts' -->
-    <script nonce="%%NONCE%%" src="%%MERMAID_JS_URI%%"></script>
+    <!-- <script nonce="%%NONCE%%" src="%%MERMAID_JS_URI%%"></script> -->
+    <!-- Use defer so it executes after parsing the HTML but before DOMContentLoaded fires. (This doesn’t weaken CSP and avoids “ran too early” surprises.) -->
+    <script nonce="%%NONCE%%" src="%%MERMAID_JS_URI%%" defer
+        onload="console.log('mermaid.js loaded OK:', this.src)"
+        onerror="console.error('mermaid.js failed to load:', this.src)">
+    </script>
+
 
     <style>
         body {
@@ -154,7 +159,7 @@
 <body>
         <h1> PseudoChart</h1>
         
-        <div class="controls">
+        <!-- <div class="controls">
             <button onclick="zoomIn()"> Zoom In</button>
             <button onclick="zoomOut()"> Zoom Out</button>
             <button onclick="resetZoom()"> Reset</button>
@@ -162,6 +167,15 @@
             <button onclick="clearHighlight()"> Clear Highlight</button>
             <button id="animateBtn" class="animation-control" onclick="startAnimation()">▶ Animate Flow</button>
             <button id="stopBtn" class="stop-button" onclick="stopAnimation()" style="display: none;">⏹ Stop</button>
+        </div> -->
+        <div class="controls">
+            <button id="btnZoomIn"> Zoom In</button>
+            <button id="btnZoomOut"> Zoom Out</button>
+            <button id="btnReset"> Reset</button>
+            <button id="btnExport"> Export SVG</button>
+            <button id="btnClear"> Clear Highlight</button>
+            <button id="animateBtn" class="animation-control">▶ Animate Flow</button>
+            <button id="stopBtn" class="stop-button" style="display:none;">⏹ Stop</button>
         </div>
         
         <div class="speed-control">
@@ -175,11 +189,6 @@
         </div>
         
         <div id="mermaid-container">
-            <!-- OLD -->
-            <!-- <div class="mermaid" id="flowchart">
-                ${mermaidCode}
-            </div> -->
-            <!-- NEW -->
             <!-- turn into outter file, use placeholder, and replace when load into 'extension.ts' -->
             <div class="mermaid" id="flowchart">%%MERMAID_CODE%%</div>
         </div>
@@ -194,24 +203,33 @@
             </ul>
         </div>
 
-    <!-- OLD -->
-    <!-- <script> -->
-
-    <!-- NEW -->
     <!-- turn into outter file, use placeholder, and replace when load into 'extension.ts' -->
     <!-- all script need nonce tag to pass security limit in extension.ts -->
     <!-- check comment of getNonce() in extension.ts -->
     <script type="application/json" id="node-order-json" nonce="%%NONCE%%">%%NODE_ORDER_JSON%%</script>    
     <script nonce="%%NONCE%%">
+            // Using Eventlistener, instead of onclick
+
+            // “Refused to execute inline event handler …”
+            // → your CSP is blocking inline onclick="..."
+            //   etc. (nonce does not whitelist inline
+            //   event attributes).
+
+            document.getElementById('btnZoomIn').addEventListener('click', zoomIn);
+            document.getElementById('btnZoomOut').addEventListener('click', zoomOut);
+            document.getElementById('btnReset').addEventListener('click', resetZoom);
+            document.getElementById('btnExport').addEventListener('click', exportSVG);
+            document.getElementById('btnClear').addEventListener('click', clearHighlight);
+            document.getElementById('animateBtn').addEventListener('click', startAnimation);
+            document.getElementById('stopBtn').addEventListener('click', stopAnimation);
+
             const vscode = acquireVsCodeApi();
             let currentScale = 1;
             let currentHighlightedNodes = [];
             let animationNodes = [];
             let animationTimer = null;
             let animationIndex = 0;
-            // <!-- OLD -->
-            // let nodeOrder = ${JSON.stringify(nodeOrder)};
-            // <!-- NEW -->
+
             // <!-- turn into outter file, use placeholder, and replace when load into 'extension.ts' -->
             const nodeOrderJsonTag = document.getElementById('node-order-json');
             let nodeOrder = [];
@@ -229,21 +247,31 @@
                 speedValue.textContent = e.target.value + 'ms';
             });
             
-            mermaid.initialize({ 
-                startOnLoad: true,
-                theme: 'default',
-                flowchart: {
-                    useMaxWidth: true,
-                    htmlLabels: true,
-                    curve: 'basis'
-                },
-                securityLevel: 'loose'
-            });
-            
-            // 當 Mermaid 完成渲染後設置
-            mermaid.init(undefined, document.querySelector('.mermaid')).then(() => {
-                console.log('Mermaid initialized, node order:', nodeOrder);
-            });
+            function initMermaidSafe() {
+                if (typeof mermaid === 'undefined') {
+                    console.error('Mermaid not loaded');
+                    return;
+                }
+                
+                 mermaid.initialize({ 
+                    startOnLoad: true,
+                    theme: 'default',
+                    flowchart: {
+                        useMaxWidth: true,
+                        htmlLabels: true,
+                        curve: 'basis'
+                    },
+                    securityLevel: 'loose'
+                });
+                
+                // 當 Mermaid 完成渲染後設置
+                mermaid.init(undefined, document.querySelector('.mermaid')).then(() => {
+                    console.log('Mermaid initialized, node order:', nodeOrder);
+                });
+            }
+
+            // Run after DOM is parsed (deferred external scripts will have executed by now)
+            document.addEventListener('DOMContentLoaded', initMermaidSafe);
             
             function findNodeElement(nodeId) {
                 const elements = document.querySelectorAll('.node');
