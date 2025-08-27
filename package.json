@@ -1,7 +1,7 @@
 {
-  "name": "m5-test2",
-  "displayName": "m5_test2",
-  "description": "generate flow chart",
+  "name": "code2pseudocode-flowchart",
+  "displayName": "Code2Pseudocode & Flowchart Generator",
+  "description": "Convert Python code to pseudocode and generate interactive flowcharts",
   "version": "0.0.1",
   "engines": {
     "vscode": "^1.102.0"
@@ -18,6 +18,11 @@
       {
         "command": "m5-test2.generate",
         "title": "Generate Flowchart (WebView)"
+      },
+      {
+        "command": "code2pseudocode.convertToPseudocode",
+        "title": "Convert to Pseudocode",
+        "category": "Code2Pseudocode"
       }
     ],
     "menus": {
@@ -26,17 +31,20 @@
           "when": "resourceExtname == .py",
           "command": "m5-test2.generate",
           "group": "navigation"
+        },
+        {
+          "command": "code2pseudocode.convertToPseudocode",
+          "when": "resourceExtname == .py",
+          "group": "1_modification"
         }
       ]
     }
   },
   "scripts": {
     "vscode:prepublish": "npm run package",
-    "compile": "npm run check-types && npm run lint && node esbuild.js",
-    "watch": "npm-run-all -p watch:*",
-    "watch:esbuild": "node esbuild.js --watch",
-    "watch:tsc": "tsc --noEmit --watch --project tsconfig.json",
-    "package": "npm run check-types && npm run lint && node esbuild.js --production",
+    "compile": "webpack",
+    "watch": "webpack --watch",
+    "package": "webpack --mode production --devtool hidden-source-map",
     "compile-tests": "tsc -p . --outDir out",
     "watch-tests": "tsc -p . -w --outDir out",
     "pretest": "npm run compile-tests && npm run compile && npm run lint",
@@ -50,15 +58,18 @@
     "@types/vscode": "^1.102.0",
     "@typescript-eslint/eslint-plugin": "^8.31.1",
     "@typescript-eslint/parser": "^8.31.1",
-    "@vscode/test-cli": "^0.0.10",
+    "@vscode/test-cli": "^0.0.11",
     "@vscode/test-electron": "^2.5.2",
-    "esbuild": "^0.25.3",
     "eslint": "^9.25.1",
-    "npm-run-all": "^4.1.5",
-    "typescript": "^5.8.3"
+    "ts-loader": "^9.5.2",
+    "typescript": "^5.8.3",
+    "webpack": "^5.99.7",
+    "webpack-cli": "^6.0.1"
   },
   "dependencies": {
     "flowchart.js": "^1.18.0",
-    "mermaid": "^11.8.1"
+    "mermaid": "^11.8.1",
+    "axios": "^1.10.0",
+    "dotenv": "^17.2.0"
   }
 }
