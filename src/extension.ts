@@ -46,6 +46,17 @@ export function activate(context: vscode.ExtensionContext) {
             nodeOrder = parseNodeSequence(nodeSequence);
             console.log('Node order:', nodeOrder);
 
+
+            //////////////////////////////////////////////
+            //                                          //
+            // Build mapping between:                   //
+            //     nodeID, label, Lineno, statement     //
+            //                                          //
+            // So that that after sorting, we can know  //
+            // which node need to execute first.         //
+            //                                          //
+            //////////////////////////////////////////////
+
             // ---- Build derived maps from nodeMeta ----
             const nodeMetaObj = parseNodeMeta(nodeMeta);
 
@@ -69,7 +80,7 @@ export function activate(context: vscode.ExtensionContext) {
 
             // Ready-to-send, execution-ordered view (for LLM or whatever)
             const orderedForLLM = nodeOrder.map((id, idx) => ({
-                order: idx,
+                // order: idx,
                 nodeId: id,
                 line: nodeIdToLine.get(id) ?? null,
                 statement: nodeIdToLabel.get(id) ?? (id === 'Start' || id === 'End' ? id : '')
@@ -77,13 +88,36 @@ export function activate(context: vscode.ExtensionContext) {
             console.log('orderedForLLM:', orderedForLLM);
             // You can now serialize `orderedForLLM` or build any {statement: lineno} list, etc.
 
+            // driver version
+            let d_order: string[] = await driverHandPassLLM(orderedForLLM, code);
+            nodeOrder = d_order;
+            console.log('new Node order:', nodeOrder);
+
             async function analyzeWithLLM(ordered: typeof orderedForLLM, fullCode: string) {
                 const payload = {
                     code: fullCode,
                     executionTrace: ordered, // already ordered and labeled
                 };
+
                 // call your LLM here…
-            }
+                try {
+                    const summary = await geminiAskWithJSON(
+                        'gemini-2.0-flash-lite',
+                        'You are a code reasoning assistant. Summarize the execution flow succinctly.',
+                        { ordered: orderedForLLM }  // your array of {order, nodeId, line, statement}
+                    );
+
+                    // Option A: show to user
+                    vscode.window.showInformationMessage('Gemini summary ready (also logged).');
+                    console.log('Gemini summary:\n', summary);
+
+                    // Option B: send to the webview
+                    currentPanel?.webview.postMessage({ command: 'llmSummary', text: summary });
+
+                } catch (err: any) {
+                    vscode.window.showErrorMessage(`Gemini error: ${err?.message || err}`);
+                }
+            }// end of analyzeWithLLM
             
             //創建或更新 Webview 面板
             if (currentPanel) {
@@ -106,7 +140,7 @@ export function activate(context: vscode.ExtensionContext) {
                 });
             }
 
-            // currentPanel.webview.html = getWebviewContent(mermaidCode, nodeOrder);
+            // load the webview html from templates
             currentPanel.webview.html = await getWebviewHtmlExternal(
                 currentPanel.webview,
                 context,
@@ -207,6 +241,148 @@ function parseNodeSequence(sequenceStr: string): string[] {
         return [];
     }
 }
+
+// driver version
+// 1. 先把 'orderedForLLM' stringfy 之後接出來
+// 2. manual pass 這個字串給 gemini
+// 3. 將 sorting 完成的結果 manual 存入這邊
+// 4. 讀取 sorting 過後的 nodeID
+// 5. 修改 'parseNodeSequence' function，可以從這邊接回去原本的接口
+//
+// 備註: animation 的邏輯是寫在 media/flowview.html 裡面的，extension.ts 後端負責 post 訊息給 webview 前端的 scripts
+
+async function driverHandPassLLM(orderedForLLM: any, fullCode: string){
+    // Step 1: 將 orderForLLM 接出來
+    let systemPrompt :string = 
+`Task: Determine the actual execution path for the code below and emit it as JSON.
+
+Rules:
+- Output MUST be valid JSON (UTF-8, double quotes, no trailing commas).
+- Include every statement that is actually executed in order.
+- For condition nodes, include the boolean result.
+- Include any printed outputs in the order they occur.
+- Do not include nodes that are never reached.
+
+Schema (exact keys):
+{
+  "executed_orders": number[],             // order indices from my node list, in execution order
+}`
+    ;
+    let jsonObj :any = { ordered: orderedForLLM };
+    const userPrompt = getFullPromptString(systemPrompt, fullCode, jsonObj);
+
+    console.log('userPrompt:');
+    console.log(userPrompt);
+
+    // Step 2: manual pass 這個字串給 gemini
+    // Step 3: 將 sorting 完成的結果 manual 存入這邊
+    let rawSortResult :string;
+    rawSortResult = getHandSaveResult();
+
+    // Step 4: 讀取 sorting 過後的 nodeID
+    let iterableResult: { executed_orders: number[] };
+    try{
+        iterableResult = JSON.parse(rawSortResult);
+    } catch (e) {
+        console.error("Failed to parse JSON from LLM:", rawSortResult);
+        throw e;
+    }
+    
+    // Step 5: 想辦法接入 'parseNodeSequence' function，可以從這邊接回去原本的接口
+    // function parseNodeSequence(sequenceStr: string): string[] {...}
+    // return string[]
+    //         |------->> ['Start', 'node1', 'node2', ..., 'node39', 'End']
+    let returnStringArray : string[] = [];
+    returnStringArray.push('Start');
+    for (const tmpNodeID of iterableResult.executed_orders) {
+        returnStringArray.push("node" + tmpNodeID);
+    }
+    returnStringArray.push('End');
+
+    return returnStringArray;
+}
+
+function getHandSaveResult(): string{
+    let handSaveString : string;
+    handSaveString = 
+`{
+  "executed_orders": [
+    1,
+    2,
+    3,
+    4,
+    11,
+    14,
+    16,
+    40
+  ]
+}`
+    ;
+    return handSaveString;
+}
+
+function getFullPromptString(systemPrompt: string, fullCode: string, jsonObj: any, ) {
+    const userPrompt = [
+        systemPrompt,
+        '',
+        'Full code:',
+        '```python',
+        fullCode,
+        '```',
+        '',
+        'JSON payload follows (triple backticks):',
+        '```json',
+        JSON.stringify(jsonObj, null, 2),
+        '```'
+    ].join('\n');
+    return userPrompt;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+//                                                                            //
+//                  Some helpers to access Gemini                             //
+//                                                                            //
+////////////////////////////////////////////////////////////////////////////////
+
+// If your VS Code runtime < Node 18, uncomment next line to polyfill fetch:
+// import { fetch } from 'undici'; (and then: (globalThis as any).fetch = fetch;)
+
+// Read the key & create a tiny Gemini client (in extension.ts)
+async function getGemini() {
+  // ESM-only SDK -> dynamic import in CJS
+  const { GoogleGenerativeAI } = await import('@google/generative-ai');
+  const apiKey =
+    vscode.workspace.getConfiguration().get<string>('gemini.apiKey') ||
+    process.env.GEMINI_API_KEY;
+
+  if (!apiKey) {
+    throw new Error(
+      "Missing Gemini API key. Set `gemini.apiKey` in Settings or export GEMINI_API_KEY."
+    );
+  }
+
+  return new GoogleGenerativeAI(apiKey);
+}
+
+// helper to send JSON payloads safely
+async function geminiAskWithJSON(modelName: string, systemPrompt: string, jsonObj: any): Promise<string> {
+  const genAI = await getGemini();
+  const model = genAI.getGenerativeModel({ model: modelName });
+
+  const userPrompt = [
+    systemPrompt,
+    '',
+    'JSON payload follows (triple backticks):',
+    '```json',
+    JSON.stringify(jsonObj, null, 2),
+    '```'
+  ].join('\n');
+
+  const result = await model.generateContent(userPrompt);
+  return result.response.text();
+}
+
+
 
 type NodeMeta = Record<string, { 
     label: string;
