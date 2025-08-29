@@ -67,9 +67,9 @@
     "webpack-cli": "^6.0.1"
   },
   "dependencies": {
-    "flowchart.js": "^1.18.0",
-    "mermaid": "^11.8.1",
     "axios": "^1.10.0",
-    "dotenv": "^17.2.0"
+    "dotenv": "^17.2.1",
+    "flowchart.js": "^1.18.0",
+    "mermaid": "^11.8.1"
   }
 }

@@ -21,7 +21,6 @@ let pseudocodePanel: vscode.WebviewPanel | undefined;
 
 // 快取管理 - 存儲程式碼區塊與 pseudocode 的對應
 const pseudocodeCache = new Map<string, string>();
-
 export function activate(context: vscode.ExtensionContext) {
     // 載入 .env 文件 - 使用 extension 根目錄的路徑
     const extensionPath = context.extensionPath;
@@ -274,6 +273,7 @@ ${getBlockTypeDisplay(codeBlock.type)} (Lines ${codeBlock.startLine + 1}-${codeB
     context.subscriptions.push(selectionDisposable);
     context.subscriptions.push(disposable, onSaveDisposable, onChangeDisposable, hoverProvider);
 }
+
 
 // 解析行號對應字符串
 function parseLineMapping(mappingStr: string): Map<number, string[]> {
@@ -1318,8 +1318,9 @@ function parsePythonWithAST(code: string): Promise<{mermaidCode: string, lineMap
 
 
 
-// Webview 內容（修改以包含新按鈕和動畫功能）
-// Webview 內容（修正版本）
+    // Webview 內容（修改以包含新按鈕和動畫功能）
+    // Webview 內容（修正版本）
+    // 修改後的 getWebviewContent 函數
 function getWebviewContent(mermaidCode: string, nodeOrder: string[]): string {
     return `<!DOCTYPE html>
     <html lang="en">
@@ -1329,75 +1330,227 @@ function getWebviewContent(mermaidCode: string, nodeOrder: string[]): string {
         <title>Python Flowchart</title>
         <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
         <style>
+            * {
+                margin: 0;
+                padding: 0;
+                box-sizing: border-box;
+            }
+            
+            html, body {
+                height: 100%;
+                overflow: hidden;
+            }
+            
             body {
                 font-family: Arial, sans-serif;
-                padding: 20px;
                 background-color: var(--vscode-editor-background);
                 color: var(--vscode-editor-foreground);
+                display: flex;
+                flex-direction: column;
             }
+            
+            /* 上方流程圖區域 - 80% */
+            .flowchart-section {
+                height: 80%;
+                display: flex;
+                flex-direction: column;
+                padding: 10px;
+                overflow: hidden;
+                border-bottom: 2px solid var(--vscode-panel-border);
+            }
+            
+            /* 下方預留區域 - 20% */
+            .output-section {
+                height: 20%;
+                padding: 10px;
+                background-color: var(--vscode-editor-inactiveSelectionBackground);
+                overflow-y: auto;
+                display: flex;
+                flex-direction: column;
+            }
+            
+            .output-section h3 {
+                margin-bottom: 10px;
+                color: var(--vscode-editor-foreground);
+                font-size: 14px;
+                border-bottom: 1px solid var(--vscode-panel-border);
+                padding-bottom: 5px;
+            }
+            
+            .output-content {
+                flex: 1;
+                padding: 10px;
+                background-color: var(--vscode-editor-background);
+                border: 1px solid var(--vscode-panel-border);
+                border-radius: 4px;
+                font-family: 'Courier New', monospace;
+                font-size: 12px;
+                overflow-y: auto;
+                color: #888;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+            }
+            
+            .header {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                padding-bottom: 10px;
+                border-bottom: 1px solid var(--vscode-panel-border);
+                margin-bottom: 10px;
+            }
+            
             h1 {
                 color: var(--vscode-editor-foreground);
-                border-bottom: 2px solid var(--vscode-panel-border);
-                padding-bottom: 10px;
+                font-size: 20px;
+                margin: 0;
             }
+            
             .controls {
-                margin: 20px 0;
                 display: flex;
-                gap: 10px;
+                gap: 8px;
                 flex-wrap: wrap;
+                margin-bottom: 10px;
+                align-items: center;
             }
+            
             button {
                 background-color: var(--vscode-button-background);
                 color: var(--vscode-button-foreground);
                 border: none;
-                padding: 8px 16px;
+                padding: 6px 12px;
                 cursor: pointer;
                 border-radius: 4px;
+                font-size: 12px;
             }
+            
             button:hover {
                 background-color: var(--vscode-button-hoverBackground);
             }
+            
             button:disabled {
                 opacity: 0.5;
                 cursor: not-allowed;
             }
+            
             .animation-control {
                 background-color: #4CAF50;
             }
+            
             .animation-control:hover {
                 background-color: #45a049;
             }
+            
             .stop-button {
                 background-color: #f44336;
             }
+            
             .stop-button:hover {
                 background-color: #da190b;
             }
+            
+            .zoom-hint {
+                font-size: 11px;
+                color: var(--vscode-descriptionForeground);
+                padding: 4px 8px;
+                background-color: var(--vscode-editor-inactiveSelectionBackground);
+                border-radius: 4px;
+                display: inline-block;
+            }
+            
             #mermaid-container {
                 background-color: white;
                 border-radius: 8px;
-                padding: 20px;
-                margin-top: 20px;
+                flex: 1;
                 overflow: auto;
-                max-height: 80vh;
+                margin-top: 10px;
+                position: relative;
+                cursor: grab;
+                user-select: none;
             }
+            
+            #mermaid-wrapper {
+                position: relative;
+                width: 300%;
+                height: 300%;
+                display: flex;
+                justify-content: center;
+                align-items: center;
+                min-width: 3000px;
+                min-height: 3000px;
+            }
+            
+            #mermaid-container.grabbing {
+                cursor: grabbing;
+            }
+            
             .mermaid {
                 text-align: center;
+                transform-origin: center center;
+                transition: transform 0.1s ease-out;
             }
-            .legend {
-                margin-top: 20px;
-                padding: 15px;
-                background-color: var(--vscode-editor-inactiveSelectionBackground);
-                border-radius: 4px;
-            }
-            .legend h3 {
-                margin-top: 0;
-            }
-            .legend-item {
-                display: inline-block;
-                margin: 5px 10px;
+            
+            /* 縮放指示器 */
+            .zoom-indicator {
+                position: absolute;
+                top: 10px;
+                right: 10px;
+                background-color: rgba(0, 0, 0, 0.6);
+                color: white;
                 padding: 5px 10px;
                 border-radius: 4px;
+                font-size: 12px;
+                font-family: monospace;
+                z-index: 1000;
+                opacity: 0;
+                transition: opacity 0.3s;
+                pointer-events: none;
+            }
+            
+            .zoom-indicator.visible {
+                opacity: 1;
+            }
+            
+            /* 拖曳模式指示器 */
+            .drag-indicator {
+                position: absolute;
+                top: 10px;
+                left: 10px;
+                background-color: rgba(0, 0, 0, 0.6);
+                color: white;
+                padding: 5px 10px;
+                border-radius: 4px;
+                font-size: 12px;
+                z-index: 1000;
+                opacity: 0;
+                transition: opacity 0.3s;
+                pointer-events: none;
+            }
+            
+            .drag-indicator.visible {
+                opacity: 1;
+            }
+            
+            .speed-control {
+                display: flex;
+                align-items: center;
+                gap: 10px;
+                font-size: 12px;
+                margin-bottom: 5px;
+            }
+            
+            .speed-slider {
+                width: 150px;
+            }
+            
+            .status-display {
+                padding: 5px 10px;
+                background-color: var(--vscode-editor-inactiveSelectionBackground);
+                border-radius: 4px;
+                font-family: monospace;
+                font-size: 12px;
+                margin-bottom: 5px;
             }
             
             /* 高亮樣式 - 保留原始顏色的發光效果 */
@@ -1442,73 +1595,78 @@ function getWebviewContent(mermaidCode: string, nodeOrder: string[]): string {
                 }
             }
             
-            .speed-control {
-                display: flex;
-                align-items: center;
-                gap: 10px;
-                margin-top: 10px;
-            }
-            
-            .speed-slider {
-                width: 200px;
-            }
-            
-            .status-display {
-                margin-top: 10px;
-                padding: 10px;
-                background-color: var(--vscode-editor-inactiveSelectionBackground);
-                border-radius: 4px;
-                font-family: monospace;
+            /* 響應式調整 */
+            @media (max-height: 600px) {
+                .flowchart-section {
+                    height: 75%;
+                }
+                .output-section {
+                    height: 25%;
+                }
             }
         </style>
     </head>
     <body>
-        <h1> PseudoChart</h1>
-        
-        <div class="controls">
-            <button onclick="zoomIn()"> Zoom In</button>
-            <button onclick="zoomOut()"> Zoom Out</button>
-            <button onclick="resetZoom()"> Reset</button>
-            <button onclick="exportSVG()"> Export SVG</button>
-            <button onclick="clearHighlight()"> Clear Highlight</button>
-            <button id="animateBtn" class="animation-control" onclick="startAnimation()">▶ Animate Flow</button>
-            <button id="stopBtn" class="stop-button" onclick="stopAnimation()" style="display: none;">⏹ Stop</button>
-        </div>
-        
-        <div class="speed-control">
-            <label for="speedSlider">Animation Speed:</label>
-            <input type="range" id="speedSlider" class="speed-slider" min="100" max="2000" value="500" step="100">
-            <span id="speedValue">500ms</span>
-        </div>
-        
-        <div id="statusDisplay" class="status-display" style="display: none;">
-            Current Node: <span id="currentNodeName">-</span>
-        </div>
-        
-        <div id="mermaid-container">
-            <div class="mermaid" id="flowchart">
-                ${mermaidCode}
+        <!-- 上方流程圖區域 (80%) -->
+        <div class="flowchart-section">
+            <div class="header">
+                <h1>PseudoChart</h1>
+            </div>
+            
+            <div class="controls">
+                <button onclick="resetView()"> Reset View</button>
+                <button onclick="exportSVG()"> Export SVG</button>
+                <button onclick="clearHighlight()"> Clear Highlight</button>
+                <button id="animateBtn" class="animation-control" onclick="startAnimation()"> Animate Flow</button>
+                <button id="stopBtn" class="stop-button" onclick="stopAnimation()" style="display: none;"> Stop</button>
+            </div>
+            
+            <div class="speed-control">
+                <label for="speedSlider">Animation Speed:</label>
+                <input type="range" id="speedSlider" class="speed-slider" min="100" max="2000" value="500" step="100">
+                <span id="speedValue">500ms</span>
+            </div>
+            
+            <div id="statusDisplay" class="status-display" style="display: none;">
+                Current Node: <span id="currentNodeName">-</span>
+            </div>
+            
+            <div id="mermaid-container">
+                <div class="zoom-indicator" id="zoomIndicator">100%</div>
+                <div class="drag-indicator" id="dragIndicator">Pan Mode</div>
+                <div id="mermaid-wrapper">
+                    <div class="mermaid" id="flowchart">
+                        ${mermaidCode}
+                    </div>
+                </div>
             </div>
         </div>
         
-        <div class="legend">
-            <h4> 功能說明：</h4>
-            <ul>
-                <li>虛線箭頭 (- - ->) 加上 "calls" 表示函式呼叫關係</li>
-                <li>點擊左側程式碼行，右側對應的流程圖節點會發光（黃色）</li>
-                <li>點擊 "Animate Flow" 按鈕，按順序展示程式執行流程（藍色發光）</li>
-                <li>調整 Animation Speed 滑桿來控制動畫速度</li>
-            </ul>
+        <!-- 下方輸出區域 (20%) -->
+        <div class="output-section">
+            <h3> LLM Pseudo code (Coming Soon)</h3>
+            <div class="output-content">
+                <span>未來整合學長那邊的GPT，感覺完美</span>
+            </div>
         </div>
         
         <script>
             const vscode = acquireVsCodeApi();
             let currentScale = 1;
             let currentHighlightedNodes = [];
-            let animationNodes = [];
+            let animationNodes = []; 
             let animationTimer = null;
             let animationIndex = 0;
             let nodeOrder = ${JSON.stringify(nodeOrder)};
+            let zoomTimeout = null;
+            let dragTimeout = null;
+            
+            // 拖曳相關變數
+            let isDragging = false;
+            let startX = 0;
+            let startY = 0;
+            let scrollLeft = 0;
+            let scrollTop = 0;
             
             // 速度滑桿控制
             const speedSlider = document.getElementById('speedSlider');
@@ -1521,17 +1679,164 @@ function getWebviewContent(mermaidCode: string, nodeOrder: string[]): string {
                 startOnLoad: true,
                 theme: 'default',
                 flowchart: {
-                    useMaxWidth: true,
+                    useMaxWidth: false,
                     htmlLabels: true,
                     curve: 'basis'
                 },
                 securityLevel: 'loose'
             });
             
-            // 當 Mermaid 完成渲染後設置
+            // 當 Mermaid 完成渲染後，自動將流程圖置中
             mermaid.init(undefined, document.querySelector('.mermaid')).then(() => {
                 console.log('Mermaid initialized, node order:', nodeOrder);
+                centerFlowchart();
             });
+            
+            // 將流程圖置中的函數
+            function centerFlowchart() {
+                const container = document.getElementById('mermaid-container');
+                const wrapper = document.getElementById('mermaid-wrapper');
+                const flowchart = document.querySelector('.mermaid svg');
+                
+                if (container && wrapper && flowchart) {
+                    // 等待一小段時間確保渲染完成
+                    setTimeout(() => {
+                        // 獲取容器和流程圖的尺寸
+                        const containerRect = container.getBoundingClientRect();
+                        const wrapperRect = wrapper.getBoundingClientRect();
+                        
+                        // 計算置中所需的滾動位置
+                        const scrollLeft = (wrapper.scrollWidth - containerRect.width) / 2;
+                        const scrollTop = (wrapper.scrollHeight - containerRect.height) / 2;
+                        
+                        // 設定滾動位置，讓流程圖出現在中央
+                        container.scrollLeft = scrollLeft;
+                        container.scrollTop = scrollTop;
+                        
+                        console.log('Flowchart centered at:', scrollLeft, scrollTop);
+                    }, 100);
+                }
+            }
+            
+            // 獲取容器元素
+            const mermaidContainer = document.getElementById('mermaid-container');
+            const zoomIndicator = document.getElementById('zoomIndicator');
+            const dragIndicator = document.getElementById('dragIndicator');
+            
+            // === 拖曳功能實現 ===
+            mermaidContainer.addEventListener('mousedown', (e) => {
+                // 檢查是否點擊在節點上（避免干擾節點點擊事件）
+                if (e.target.closest('.node')) {
+                    return;
+                }
+                
+                isDragging = true;
+                mermaidContainer.classList.add('grabbing');
+                
+                // 記錄起始位置
+                startX = e.pageX - mermaidContainer.offsetLeft;
+                startY = e.pageY - mermaidContainer.offsetTop;
+                scrollLeft = mermaidContainer.scrollLeft;
+                scrollTop = mermaidContainer.scrollTop;
+                
+                // 顯示拖曳指示器
+                dragIndicator.classList.add('visible');
+                
+                // 清除之前的 timeout
+                if (dragTimeout) {
+                    clearTimeout(dragTimeout);
+                }
+                
+                e.preventDefault();
+            });
+            
+            mermaidContainer.addEventListener('mousemove', (e) => {
+                if (!isDragging) return;
+                
+                e.preventDefault();
+                
+                // 計算移動距離
+                const x = e.pageX - mermaidContainer.offsetLeft;
+                const y = e.pageY - mermaidContainer.offsetTop;
+                const walkX = (x - startX) * 1.5; // 增加移動速度
+                const walkY = (y - startY) * 1.5;
+                
+                // 更新滾動位置
+                mermaidContainer.scrollLeft = scrollLeft - walkX;
+                mermaidContainer.scrollTop = scrollTop - walkY;
+            });
+            
+            mermaidContainer.addEventListener('mouseup', () => {
+                if (isDragging) {
+                    isDragging = false;
+                    mermaidContainer.classList.remove('grabbing');
+                    
+                    // 1秒後隱藏拖曳指示器
+                    dragTimeout = setTimeout(() => {
+                        dragIndicator.classList.remove('visible');
+                    }, 1000);
+                }
+            });
+            
+            // 防止拖曳時選擇文字
+            mermaidContainer.addEventListener('selectstart', (e) => {
+                if (isDragging) {
+                    e.preventDefault();
+                }
+            });
+            
+            // 如果滑鼠離開容器也要停止拖曳
+            mermaidContainer.addEventListener('mouseleave', () => {
+                if (isDragging) {
+                    isDragging = false;
+                    mermaidContainer.classList.remove('grabbing');
+                    
+                    dragTimeout = setTimeout(() => {
+                        dragIndicator.classList.remove('visible');
+                    }, 1000);
+                }
+            });
+            
+            // === Ctrl + 滾輪縮放功能 ===
+            mermaidContainer.addEventListener('wheel', (e) => {
+                // 檢查是否按住 Ctrl 鍵（Windows/Linux）或 Cmd 鍵（Mac）
+                if (e.ctrlKey || e.metaKey) {
+                    e.preventDefault();
+                    
+                    // 計算縮放因子
+                    const zoomSpeed = 0.1;
+                    const delta = e.deltaY > 0 ? -zoomSpeed : zoomSpeed;
+                    
+                    // 更新縮放比例（限制在 0.1 到 5 之間）
+                    const newScale = Math.min(Math.max(0.1, currentScale + delta), 5);
+                    
+                    if (newScale !== currentScale) {
+                        currentScale = newScale;
+                        document.querySelector('.mermaid').style.transform = \`scale(\${currentScale})\`;
+                        
+                        // 顯示縮放指示器
+                        zoomIndicator.textContent = Math.round(currentScale * 100) + '%';
+                        zoomIndicator.classList.add('visible');
+                        
+                        // 清除之前的 timeout
+                        if (zoomTimeout) {
+                            clearTimeout(zoomTimeout);
+                        }
+                        
+                        // 2秒後隱藏指示器
+                        zoomTimeout = setTimeout(() => {
+                            zoomIndicator.classList.remove('visible');
+                        }, 2000);
+                    }
+                }
+            }, { passive: false });
+            
+            // 防止 Ctrl + 滾輪的預設瀏覽器縮放行為
+            document.addEventListener('wheel', (e) => {
+                if (e.ctrlKey || e.metaKey) {
+                    e.preventDefault();
+                }
+            }, { passive: false });
             
             function findNodeElement(nodeId) {
                 const elements = document.querySelectorAll(\`.node\`);
@@ -1560,12 +1865,38 @@ function getWebviewContent(mermaidCode: string, nodeOrder: string[]): string {
                 console.log('Highlighting nodes:', nodeIds);
                 
                 //高亮新的節點
-                nodeIds.forEach(nodeId => {
+                nodeIds.forEach((nodeId, index) => {
                     const element = findNodeElement(nodeId);
                     if (element) {
                         element.classList.add('highlighted');
                         currentHighlightedNodes.push(element);
                         console.log('Highlighted element:', element.id);
+                        
+                        // 將第一個高亮的節點置中
+                        if (index === 0) {
+                            // 使用 scrollIntoView 並置中顯示
+                            element.scrollIntoView({ 
+                                behavior: 'smooth', 
+                                block: 'center',
+                                inline: 'center'
+                            });
+                            
+                            // 如果有縮放，確保元素在視窗中心
+                            const container = document.getElementById('mermaid-container');
+                            const rect = element.getBoundingClientRect();
+                            const containerRect = container.getBoundingClientRect();
+                            
+                            // 計算需要滾動的距離
+                            const scrollLeft = container.scrollLeft + rect.left - containerRect.left - (containerRect.width / 2) + (rect.width / 2);
+                            const scrollTop = container.scrollTop + rect.top - containerRect.top - (containerRect.height / 2) + (rect.height / 2);
+                            
+                            // 平滑滾動到計算出的位置
+                            container.scrollTo({
+                                left: scrollLeft,
+                                top: scrollTop,
+                                behavior: 'smooth'
+                            });
+                        }
                     }
                 });
                 
@@ -1682,19 +2013,32 @@ function getWebviewContent(mermaidCode: string, nodeOrder: string[]): string {
                 }
             });
             
-            function zoomIn() {
-                currentScale += 0.1;
-                document.querySelector('.mermaid').style.transform = \`scale(\${currentScale})\`;
-            }
-            
-            function zoomOut() {
-                currentScale = Math.max(0.5, currentScale - 0.1);
-                document.querySelector('.mermaid').style.transform = \`scale(\${currentScale})\`;
-            }
-            
-            function resetZoom() {
+            function resetView() {
+                // 重置縮放
                 currentScale = 1;
                 document.querySelector('.mermaid').style.transform = 'scale(1)';
+                
+                // 重新置中流程圖
+                centerFlowchart();
+                
+                // 顯示縮放指示器
+                zoomIndicator.textContent = '100%';
+                zoomIndicator.classList.add('visible');
+                
+                // 清除之前的 timeout
+                if (zoomTimeout) {
+                    clearTimeout(zoomTimeout);
+                }
+                
+                // 2秒後隱藏指示器
+                zoomTimeout = setTimeout(() => {
+                    zoomIndicator.classList.remove('visible');
+                }, 2000);
+            }
+            
+            // 舊的 resetZoom 函數保留以維持相容性
+            function resetZoom() {
+                resetView();
             }
             
             function exportSVG() {
@@ -1738,9 +2082,9 @@ function isBlockStart(lineText: string): boolean {
         trimmed.startsWith('match ');
 }
 
-/**
- * 取得區塊類型的顯示名稱
- */
+
+
+
 function getBlockTypeDisplay(type: CodeBlockType): string {
     switch (type) {
         case CodeBlockType.FUNCTION:
@@ -1761,6 +2105,9 @@ function getBlockTypeDisplay(type: CodeBlockType): string {
             return '📋 Code Block';
     }
 }
+
+
+
 
 /**
  * 執行程式碼轉換為 pseudocode 的核心邏輯
@@ -1827,6 +2174,9 @@ async function convertToPseudocode(isAutoUpdate: boolean = false) {
     });
 }
 
+
+
+
 /**
  * 創建分割視窗顯示 pseudocode
  */
@@ -1856,6 +2206,10 @@ async function showPseudocodePanel(pseudocode: string) {
     // 設置 WebView 內容
     pseudocodePanel.webview.html = getPseudocodeWebviewContent(pseudocode);
 }
+
+
+
+
 
 /**
  * 生成 Pseudocode WebView 的 HTML 內容
@@ -1924,12 +2278,9 @@ function escapeHtml(text: string): string {
         .replace(/"/g, '&quot;')
         .replace(/'/g, '&#039;');
 }
-
-export function deactivate() {
-    if (currentPanel) {
-        currentPanel.dispose();
+    export function deactivate() {
+        if (currentPanel) {
+            currentPanel.dispose();
+        }
+        
     }
-    if (pseudocodePanel) {
-        pseudocodePanel.dispose();
-    }
-}
