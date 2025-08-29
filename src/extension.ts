@@ -235,6 +235,7 @@ ${getBlockTypeDisplay(codeBlock.type)} (Lines ${codeBlock.startLine + 1}-${codeB
     });
 
     //游標位置變化的資訊
+    //游標位置變化的資訊
     let selectionDisposable = vscode.window.onDidChangeTextEditorSelection((e) => {
         if (!currentPanel) {
             return;
@@ -245,27 +246,67 @@ ${getBlockTypeDisplay(codeBlock.type)} (Lines ${codeBlock.startLine + 1}-${codeB
             return;
         }
 
-        //取得目前所在的是哪一行的資訊（從1開始）
-        const lineNumber = e.selections[0].active.line + 1;
+        const selection = e.selections[0];
         
-        console.log('Cursor at line:', lineNumber);
-        console.log('Line to node map:', Array.from(lineToNodeMap.entries()));
-        
-        //查找對應的節點ID
-        const nodeIds = lineToNodeMap.get(lineNumber);
-        if (nodeIds && nodeIds.length > 0) {
-            console.log('Found nodes for line', lineNumber, ':', nodeIds);
-            //發送消息到webview並將該節點發光，bling bling這樣
-            currentPanel.webview.postMessage({
-                command: 'highlightNodes',
-                nodeIds: nodeIds
-            });
+        // 檢查是否有選取範圍（多行選取）
+        if (!selection.isEmpty) {
+            // 有選取範圍時，獲取選取的起始行和結束行
+            const startLine = selection.start.line + 1; // 轉換為1-based
+            const endLine = selection.end.line + 1;
+            
+            console.log(`Selection from line ${startLine} to ${endLine}`);
+            console.log('Line to node map:', Array.from(lineToNodeMap.entries()));
+            
+            // 收集所有選取行對應的節點ID
+            const allNodeIds = new Set<string>();
+            
+            for (let line = startLine; line <= endLine; line++) {
+                const nodeIds = lineToNodeMap.get(line);
+                if (nodeIds && nodeIds.length > 0) {
+                    nodeIds.forEach(id => allNodeIds.add(id));
+                    console.log(`Line ${line} has nodes:`, nodeIds);
+                }
+            }
+            
+            if (allNodeIds.size > 0) {
+                const nodeIdsArray = Array.from(allNodeIds);
+                console.log('Highlighting multiple nodes:', nodeIdsArray);
+                
+                // 發送消息到webview，高亮所有選取行對應的節點
+                currentPanel.webview.postMessage({
+                    command: 'highlightNodes',
+                    nodeIds: nodeIdsArray
+                });
+            } else {
+                console.log('No nodes found for selected lines');
+                // 清除高亮
+                currentPanel.webview.postMessage({
+                    command: 'clearHighlight'
+                });
+            }
         } else {
-            console.log('No nodes found for line', lineNumber);
-            //把亮亮的清除
-            currentPanel.webview.postMessage({
-                command: 'clearHighlight'
-            });
+            // 沒有選取範圍時，只處理游標所在行
+            const lineNumber = selection.active.line + 1;
+            
+            console.log('Cursor at line:', lineNumber);
+            console.log('Line to node map:', Array.from(lineToNodeMap.entries()));
+            
+            // 查找對應的節點ID
+            const nodeIds = lineToNodeMap.get(lineNumber);
+            if (nodeIds && nodeIds.length > 0) {
+                console.log('Found nodes for line', lineNumber, ':', nodeIds);
+                // 發送消息到webview並將該節點發光
+                currentPanel.webview.postMessage({
+                    command: 'highlightNodes',
+                    nodeIds: nodeIds
+                });
+            } else {
+                console.log('No nodes found for line', lineNumber);
+                // 清除高亮
+                currentPanel.webview.postMessage({
+                    command: 'clearHighlight'
+                });
+            }
         }
     });
 
