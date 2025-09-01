@@ -1,3 +1,6 @@
+# a = input(eval("a"))
+# b = input(eval("b"))
+# c = input(eval("c"))
 a = 1
 b = 2
 c = 3
