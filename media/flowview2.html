@@ -211,7 +211,7 @@
             });
             
             function findNodeElement(nodeId) {
-                const elements = document.querySelectorAll(\`.node\`);
+                const elements = document.querySelectorAll('.node');
                 for (const el of elements) {
                     const elementId = el.id;
                     if (elementId) {
@@ -361,12 +361,12 @@
             
             function zoomIn() {
                 currentScale += 0.1;
-                document.querySelector('.mermaid').style.transform = \`scale(\${currentScale})\`;
+                document.querySelector('.mermaid').style.transform = 'scale(' + currentScale + ')';
             }
             
             function zoomOut() {
                 currentScale = Math.max(0.5, currentScale - 0.1);
-                document.querySelector('.mermaid').style.transform = \`scale(\${currentScale})\`;
+                document.querySelector('.mermaid').style.transform = 'scale(' + currentScale + ')';
             }
             
             function resetZoom() {
