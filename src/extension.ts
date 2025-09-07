@@ -1379,6 +1379,18 @@ except Exception as e:
 `;
 }
 
+// That guarantees everything your script print()s comes out as UTF-8, regardless of the Windows console code page.
+function setPythonStdoutEncoding(): String{
+    let retStr : String;
+    retStr =
+`import sys
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="strict")
+    sys.stderr.reconfigure(encoding="utf-8", errors="backslashreplace")
+`;
+    return retStr;
+}
+
 // 使用 Python 的 AST 模組來解析程式碼
 function parsePythonWithAST(code: string): Promise<{
     mermaidCode: string, 
@@ -1387,7 +1399,7 @@ function parsePythonWithAST(code: string): Promise<{
     nodeMeta: string
 }> {
     return new Promise((resolve, reject) => {
-        const pythonScript = generatePythonASTClass() + generatePythonMain(code);
+        const pythonScript = setPythonStdoutEncoding() + generatePythonASTClass() + generatePythonMain(code);
         
         // 創建臨時文件來避免命令行長度限制
         const tempDir = os.tmpdir();
@@ -1438,7 +1450,9 @@ function parsePythonWithAST(code: string): Promise<{
             console.log(`Trying Python command: ${pythonCmd}`);
             
             // 使用臨時文件而不是 -c 參數
-            const python = spawn(pythonCmd, [tempScriptPath]);
+            const env = { ...process.env, PYTHONIOENCODING: 'utf-8' };
+            const args = ['-X', 'utf8', tempScriptPath]; // works on Python 3.7+
+            const python = spawn(pythonCmd, args, { env });
             
             let output = '';
             let error = '';

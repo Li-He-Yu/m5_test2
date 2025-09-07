@@ -219,6 +219,12 @@
             transition: transform 0.1s ease-out;
         }
         
+        /* Mermaid labels live inside the SVG; this covers them */
+        .mermaid, .mermaid svg {
+            font-family: system-ui, "Segoe UI", "Microsoft JhengHei", "PingFang TC",
+                        "Noto Sans CJK TC", Arial, sans-serif;
+        }
+        
         /* 縮放指示器 */
         .zoom-indicator {
             position: absolute;
@@ -537,7 +543,7 @@
             const rawId = el.id || '';
             let nodeId = rawId.split('-')[1] || rawId;
 
-            // handle special ids you already support
+            // handle special ids
             if (rawId.includes('Start')) nodeId = 'Start';
             if (rawId.includes('End'))   nodeId = 'End';
 
