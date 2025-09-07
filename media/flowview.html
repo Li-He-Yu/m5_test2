@@ -12,6 +12,37 @@
             script-src %%CSP_SOURCE%% 'nonce-%%NONCE%%';
             style-src %%CSP_SOURCE%% 'unsafe-inline';
             font-src %%CSP_SOURCE%%;">
+<!-- 
+        <meta http-equiv="Content-Security-Policy"
+                |______________________________________________> limit of VScode webview
+            content="default-src 'none';
+                |______________________________________________> Block everything by default (scripts, images, fonts, XHR,
+                                                                 frames, etc.). You then opt-in per type with the other directives.
+                img-src %%CSP_SOURCE%% data:;
+                    |__________________________________________> Allow images to load only from the webview’s special
+                                                                 origin (anything you ran through webview.asWebviewUri(...))
+                                                                 and from data: URLs.
+
+                                                                 Why data:? Useful for inline/base64 images (e.g., generated
+                                                                 SVG/PNG thumbnails, mermaid render outputs, etc.).
+                script-src %%CSP_SOURCE%% 'nonce-%%NONCE%%';
+                   |                             |_____________> allow inline <script>
+                   |___________________________________________> allow src="%%MERMAID_JS_URI%%" be loaded in runtime
+                style-src %%CSP_SOURCE%% 'unsafe-inline';
+                    |__________________________________________> Allow CSS files from the webview origin and inline styles.
+                                                                The %%CSP_SOURCE%% part lets you do
+                                                                <link rel="stylesheet" href="{asWebviewUri(.../style.css)}">.
+
+                                                                'unsafe-inline' is only for CSS (not JS). It permits
+                                                                <style>...</style> blocks and style="..." attributes.
+                                                                This is common/handy in webviews, and far less risky than
+                                                                allowing inline scripts. Even with this, inline event
+                                                                handlers (e.g., onclick="...") are still scripts and remain
+                                                                blocked.
+                font-src %%CSP_SOURCE%%;">
+                    |__________________________________________> Allow web fonts only from the webview origin (e.g.,
+                                                                @font-face pointing to asWebviewUri(.../myfont.woff2)).    
+-->
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Python Flowchart</title>
     <!-- <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script> -->
@@ -20,6 +51,12 @@
         onload="console.log('mermaid.js loaded OK:', this.src)"
         onerror="console.error('mermaid.js failed to load:', this.src)">
     </script>
+<!-- 
+    <script nonce="%%NONCE%%" src="%%MERMAID_JS_URI%%" defer
+        ...> 
+    </script>
+    >>>> load "%%MERMAID_JS_URI%%" into html, before the whole file finish rendering    
+-->
     <style>
         * {
             margin: 0;
@@ -374,7 +411,7 @@
         // document.getElementById('btnZoomOut').addEventListener('click', zoomOut);
         document.getElementById('btnReset').addEventListener('click', resetView);
         document.getElementById('btnExport').addEventListener('click', exportSVG);
-        document.getElementById('btnClear').addEventListener('click', clearHighlight);
+        document.getElementById('btnClear').addEventListener('click', clearHighlightAndEditor);
         document.getElementById('animateBtn').addEventListener('click', startAnimation);
         document.getElementById('stopBtn').addEventListener('click', stopAnimation);
 
@@ -426,6 +463,7 @@
                 flowchart: {
                     // useMaxWidth: true,
                     // ?? 2025/09/05 merge 的時候 不太確定這個變動是什麼 by 和豫
+                    // 好像會影響 reset 的大小
                     useMaxWidth: false,
                     htmlLabels: true,
                     curve: 'basis'
@@ -475,6 +513,42 @@
         const mermaidContainer = document.getElementById('mermaid-container');
         const zoomIndicator = document.getElementById('zoomIndicator');
         const dragIndicator = document.getElementById('dragIndicator');
+
+
+        
+        // ===============================================================
+        // highlight a line of statement, when click on a node element
+        // post message to backend
+        mermaidContainer.addEventListener('click', (e) => {
+            const el = e.target.closest('.node');   // Mermaid renders nodes as <g class="node">...
+            if (!el) return;
+            // e: event Object; addEventListener callback pass in
+            // e.target:
+            //  the element trigger this event
+            //  e.g., 
+            //      click the <text>  >>>>  e.target === <text>
+            //      click the <rect>  >>>>  e.target === <rect>
+            // Element.closest(selector):
+            //  which is a DOM API
+            //  search from parent to its ancestor; return first match '.node';
+            //      '.node' mean class = "node"
+
+            // Mermaid node <g> ids typically look like "flowchart-node23" or similar
+            const rawId = el.id || '';
+            let nodeId = rawId.split('-')[1] || rawId;
+
+            // handle special ids you already support
+            if (rawId.includes('Start')) nodeId = 'Start';
+            if (rawId.includes('End'))   nodeId = 'End';
+
+            // post message to backend
+            vscode.postMessage({ command: 'webview.nodeClicked', nodeId });
+            
+            // keep the frontend highlight
+            highlightNodes([nodeId]);
+        });
+
+        
         
         // === 拖曳功能實現 ===
         mermaidContainer.addEventListener('mousedown', (e) => {
@@ -613,6 +687,7 @@
             return null;
         }
         
+        // nodeIds: Number[]
         function highlightNodes(nodeIds) {
             //清除之前的高亮
             clearHighlight();
@@ -660,12 +735,19 @@
             }
         }
         
+        // DOM-only clear (no postMessage)
         function clearHighlight() {
             // 移除所有高亮
             currentHighlightedNodes.forEach(el => {
                 el.classList.remove('highlighted');
             });
             currentHighlightedNodes = [];
+        }
+
+        // Button-driven clear (DOM + ask extension to clear editor)
+        function clearHighlightAndEditor() {
+            clearHighlight();
+            vscode.postMessage({ command: 'webview.requestClearEditor' });
         }
         
         function clearAnimationHighlight() {
