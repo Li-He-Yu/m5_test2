@@ -248,7 +248,7 @@ ${getBlockTypeDisplay(codeBlock.type)} (Lines ${codeBlock.startLine + 1}-${codeB
                             break;
                         }
                         case 'webview.requestClearEditor':{
-                            highlightEditor(editor, []);
+                            clearEditor(editor);
                             break;
                         }
                     }
@@ -275,6 +275,9 @@ ${getBlockTypeDisplay(codeBlock.type)} (Lines ${codeBlock.startLine + 1}-${codeB
         }
 
         const selection = e.selections[0];
+        
+        // clear editor first
+        clearEditor(editor);
         
         // 檢查是否有選取範圍（多行選取）
         if (!selection.isEmpty) {
@@ -404,6 +407,10 @@ function highlightEditor(
     editor.revealRange(ranges[0], vscode.TextEditorRevealType.InCenterIfOutsideViewport);
 }
 
+function clearEditor(editor: typeof vscode.window.activeTextEditor):void{
+    highlightEditor(editor, []);
+}
+
 // 解析行號對應字符串
 function parseLineMapping(mappingStr: string): Map<number, string[]> {
     const map = new Map<number, string[]>();
@@ -456,7 +463,8 @@ async function parseNodeSequence(sequenceStr: string, nodeMeta: string, fullCode
     const orderedForLLM = sequence.map((tmpNodeId) => ({
         nodeId: tmpNodeId,
         line: nodeIdToLine.get(tmpNodeId) ?? null,
-        statement: nodeIdToLabel.get(tmpNodeId) ?? (tmpNodeId === 'Start' || tmpNodeId === 'End' ? tmpNodeId : '')
+        // statement: nodeIdToLabel.get(tmpNodeId) ?? (tmpNodeId === 'Start' || tmpNodeId === 'End' ? tmpNodeId : '')
+        statement: nodeIdToLabel.get(tmpNodeId) ?? (nodeIdStringIsStartOrEnd(tmpNodeId) ? tmpNodeId : '')
     }));
     // console.log('orderedForLLM:', orderedForLLM);
 
