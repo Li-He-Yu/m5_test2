@@ -7,7 +7,7 @@ import { codeToPseudocode } from './claudeApi';
 import { PythonCodeBlockParser, CodeBlock, CodeBlockType } from './codeBlockParser';
 import * as dotenv from 'dotenv';
 import { askGeminiSortCode } from './SortAnimationGemini';
-import { languageChoose } from './LanguageAnalyzer';
+// import { languageChoose } from './LanguageAnalyzer';
 import { parsePythonWithAST } from './pythonAnalyzer';
 import { WebViewNodeClickEventHandler, clearEditor } from './WebviewEventHandler';
 
