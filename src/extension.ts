@@ -7,7 +7,7 @@ import { codeToPseudocode } from './claudeApi';
 import { PythonCodeBlockParser, CodeBlock, CodeBlockType } from './codeBlockParser';
 import * as dotenv from 'dotenv';
 import { askGeminiSortCode } from './SortAnimationGemini';
-import { languageChoose } from './LanguageAnalyzer';
+import { parseCode } from './LanguageAnalyzer';
 import { parsePythonWithAST } from './pythonAnalyzer';
 import { WebViewNodeClickEventHandler, clearEditor } from './WebviewEventHandler';
 
@@ -180,19 +180,19 @@ ${getBlockTypeDisplay(codeBlock.type)} (Lines ${codeBlock.startLine + 1}-${codeB
         }
 
         const document = editor.document;
-        // languageChoose(editor);
         
-        if (document.languageId !== 'python') {
-            vscode.window.showErrorMessage('Current file is not a Python file');
-            return;
-        }
+        // if (document.languageId !== 'python') {
+        //     vscode.window.showErrorMessage('Current file is not a Python file');
+        //     return;
+        // }
 
         const code = document.getText();
         
         try {
             //使用 Python AST 來解析程式碼，並獲取每一行的對應關係
-            const { mermaidCode, lineMapping, nodeSequence, nodeMeta } = await parsePythonWithAST(code);
-            
+            // const { mermaidCode, lineMapping, nodeSequence, nodeMeta } = await parsePythonWithAST(code);
+            const { mermaidCode, lineMapping, nodeSequence, nodeMeta } = await parseCode(editor);
+
             console.log('Generated Mermaid code:');
             console.log(mermaidCode);
             console.log('Line mapping:', lineMapping);

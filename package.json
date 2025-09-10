@@ -28,9 +28,10 @@
     "menus": {
       "editor/context": [
         {
-          "when": "resourceExtname == .py",
           "command": "m5-test2.generate",
-          "group": "navigation"
+          "when": "editorTextFocus && editorLangId =~ /^(python|javascript|typescript|cpp|c|java)$/",
+          "group": "navigation",
+          "description": "Right-click inside the editor (context menu) Show for multiple languages without listing every extension: editorLangId values: python, javascript, typescript, cpp, c, java, etc. "
         },
         {
           "command": "code2pseudocode.convertToPseudocode",
@@ -77,9 +78,10 @@
     "webpack-cli": "^6.0.1"
   },
   "dependencies": {
+    "@babel/parser": "^7.28.4",
+    "@google/generative-ai": "^0.24.1",
     "axios": "^1.10.0",
     "dotenv": "^17.2.1",
-    "@google/generative-ai": "^0.24.1",
     "flowchart.js": "^1.18.0",
     "mermaid": "^11.8.1"
   }
