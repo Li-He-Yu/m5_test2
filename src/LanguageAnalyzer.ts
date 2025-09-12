@@ -2,19 +2,16 @@ import * as vscode from 'vscode';
 import { typescriptLanguageHandler } from './tsAnalyzer';
 import { parsePythonWithAST } from './pythonAnalyzer';
 
-export async function parseCode(editor: typeof vscode.window.activeTextEditor): Promise<{
-    mermaidCode: string, 
-    lineMapping: string, 
-    nodeSequence: string,
-    nodeMeta: string
-}> {
+export interface ParseResult {
+    mermaidCode: string;        // same shape your Python path returns
+    lineMapping: string;        // JSON string map: { "12": ["node7", ...], ... }
+    nodeSequence: string;       // JSON string array: ["Start","node1",...,"End"]
+    nodeMeta: string;           // JSON string of NodeMeta
+}
 
-    let parseResult : Promise<{
-        mermaidCode  : string,
-        lineMapping  : string,
-        nodeSequence : string,
-        nodeMeta     : string
-    }> = Promise.resolve({
+export async function parseCode(editor: typeof vscode.window.activeTextEditor): Promise<ParseResult> {
+
+    let Result : Promise<ParseResult> = Promise.resolve({
         mermaidCode  : "",
         lineMapping  : "",
         nodeSequence : "",
@@ -33,13 +30,13 @@ export async function parseCode(editor: typeof vscode.window.activeTextEditor): 
     const fullCode = document.getText();
     switch (document.languageId){
         case 'python':
-            parseResult = parsePythonWithAST(fullCode);
+            Result = parsePythonWithAST(fullCode);
             break;
         case 'typescript':
         case 'javascript':
         case 'typescriptreact':
         case 'javascriptreact':
-            parseResult = typescriptLanguageHandler(fullCode); 
+            Result = typescriptLanguageHandler(fullCode); 
             break;
         case 'c':
         case 'cpp':
@@ -58,6 +55,6 @@ export async function parseCode(editor: typeof vscode.window.activeTextEditor): 
             break;
     }
 
-    return parseResult;
+    return Result;
 }
 
