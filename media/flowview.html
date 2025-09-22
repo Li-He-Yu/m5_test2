@@ -2,61 +2,18 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <!-- Add a CSP meta (first <head> section), so inline scripts can run with a nonce in VS Code Webview -->
-    <!-- A nonce only allows inline scripts. It does not whitelist external scripts. Your mermaid URI is:-->
-    <!-- https://file+.vscode-resource.vscode-cdn.net/.../media/mermaid.min.js -->
-    <!-- For VS Code webviews, you must also allow the webview’s origin via %%CSP_SOURCE%%. -->
     <meta http-equiv="Content-Security-Policy"
         content="default-src 'none';
             img-src %%CSP_SOURCE%% data:;
             script-src %%CSP_SOURCE%% 'nonce-%%NONCE%%';
             style-src %%CSP_SOURCE%% 'unsafe-inline';
             font-src %%CSP_SOURCE%%;">
-<!-- 
-        <meta http-equiv="Content-Security-Policy"
-                |______________________________________________> limit of VScode webview
-            content="default-src 'none';
-                |______________________________________________> Block everything by default (scripts, images, fonts, XHR,
-                                                                 frames, etc.). You then opt-in per type with the other directives.
-                img-src %%CSP_SOURCE%% data:;
-                    |__________________________________________> Allow images to load only from the webview’s special
-                                                                 origin (anything you ran through webview.asWebviewUri(...))
-                                                                 and from data: URLs.
-
-                                                                 Why data:? Useful for inline/base64 images (e.g., generated
-                                                                 SVG/PNG thumbnails, mermaid render outputs, etc.).
-                script-src %%CSP_SOURCE%% 'nonce-%%NONCE%%';
-                   |                             |_____________> allow inline <script>
-                   |___________________________________________> allow src="%%MERMAID_JS_URI%%" be loaded in runtime
-                style-src %%CSP_SOURCE%% 'unsafe-inline';
-                    |__________________________________________> Allow CSS files from the webview origin and inline styles.
-                                                                The %%CSP_SOURCE%% part lets you do
-                                                                <link rel="stylesheet" href="{asWebviewUri(.../style.css)}">.
-
-                                                                'unsafe-inline' is only for CSS (not JS). It permits
-                                                                <style>...</style> blocks and style="..." attributes.
-                                                                This is common/handy in webviews, and far less risky than
-                                                                allowing inline scripts. Even with this, inline event
-                                                                handlers (e.g., onclick="...") are still scripts and remain
-                                                                blocked.
-                font-src %%CSP_SOURCE%%;">
-                    |__________________________________________> Allow web fonts only from the webview origin (e.g.,
-                                                                @font-face pointing to asWebviewUri(.../myfont.woff2)).    
--->
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Python Flowchart</title>
-    <!-- <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script> -->
-    <!-- Use defer so it executes after parsing the HTML but before DOMContentLoaded fires. (This doesn’t weaken CSP and avoids “ran too early” surprises.) -->
     <script nonce="%%NONCE%%" src="%%MERMAID_JS_URI%%" defer
         onload="console.log('mermaid.js loaded OK:', this.src)"
         onerror="console.error('mermaid.js failed to load:', this.src)">
     </script>
-<!-- 
-    <script nonce="%%NONCE%%" src="%%MERMAID_JS_URI%%" defer
-        ...> 
-    </script>
-    >>>> load "%%MERMAID_JS_URI%%" into html, before the whole file finish rendering    
--->
     <style>
         * {
             margin: 0;
@@ -77,9 +34,9 @@
             flex-direction: column;
         }
         
-        /* 上方流程圖區域 - 80% */
+        /* 上方流程圖區域 - 65% */
         .flowchart-section {
-            height: 80%;
+            height: 65%;
             display: flex;
             flex-direction: column;
             padding: 10px;
@@ -87,24 +44,46 @@
             border-bottom: 2px solid var(--vscode-panel-border);
         }
         
-        /* 下方預留區域 - 20% */
+        /* 下方預留區域 - 35% */
         .output-section {
-            height: 20%;
+            height: 35%;
             padding: 10px;
             background-color: var(--vscode-editor-inactiveSelectionBackground);
-            overflow-y: auto;
+            overflow: hidden;
             display: flex;
             flex-direction: column;
         }
-        
-        .output-section h3 {
-            margin-bottom: 10px;
-            color: var(--vscode-editor-foreground);
-            font-size: 14px;
+
+        .output-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin: 0 0 10px 0;
             border-bottom: 1px solid var(--vscode-panel-border);
             padding-bottom: 5px;
+            flex-shrink: 0;
         }
-        
+
+        .output-section h3 {
+            margin: 0;
+            color: var(--vscode-editor-foreground);
+            font-size: 14px;
+        }
+
+        .clear-btn {
+            background-color: var(--vscode-button-background);
+            color: var(--vscode-button-foreground);
+            border: none;
+            padding: 4px 8px;
+            cursor: pointer;
+            border-radius: 3px;
+            font-size: 11px;
+        }
+
+        .clear-btn:hover {
+            background-color: var(--vscode-button-hoverBackground);
+        }
+
         .output-content {
             flex: 1;
             padding: 10px;
@@ -114,12 +93,53 @@
             font-family: 'Courier New', monospace;
             font-size: 12px;
             overflow-y: auto;
-            color: #888;
-            display: flex;
-            align-items: center;
-            justify-content: center;
+            color: var(--vscode-editor-foreground);
+            text-align: left;
+            min-height: 0;
         }
-        
+
+        .output-content pre {
+            margin: 0;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            font-family: 'Courier New', Consolas, 'Monaco', monospace;
+            font-size: 12px;
+            line-height: 1.4;
+            color: var(--vscode-editor-foreground);
+        }
+
+        .output-content pre:empty::after {
+            content: "等待生成 Pseudocode...";
+            color: #888;
+            font-style: italic;
+        }
+
+        /* 分隔線樣式 */
+        .pseudocode-separator {
+            border-top: 1px dashed var(--vscode-panel-border);
+            margin: 10px 0;
+            opacity: 0.5;
+        }
+
+        /* 時間戳樣式 */
+        .pseudocode-timestamp {
+            color: var(--vscode-descriptionForeground);
+            font-size: 11px;
+            font-style: italic;
+        }
+
+        /* 區塊類型標識樣式 */
+        .pseudocode-type {
+            color: var(--vscode-symbolIcon-functionForeground);
+            font-weight: bold;
+        }
+
+        /* 快取標識樣式 */
+        .pseudocode-cached {
+            color: var(--vscode-charts-orange);
+            font-size: 11px;
+        }
+
         .header {
             display: flex;
             justify-content: space-between;
@@ -162,31 +182,6 @@
             cursor: not-allowed;
         }
         
-        .animation-control {
-            background-color: #4CAF50;
-        }
-        
-        .animation-control:hover {
-            background-color: #45a049;
-        }
-        
-        .stop-button {
-            background-color: #f44336;
-        }
-        
-        .stop-button:hover {
-            background-color: #da190b;
-        }
-        
-        .zoom-hint {
-            font-size: 11px;
-            color: var(--vscode-descriptionForeground);
-            padding: 4px 8px;
-            background-color: var(--vscode-editor-inactiveSelectionBackground);
-            border-radius: 4px;
-            display: inline-block;
-        }
-        
         #mermaid-container {
             background-color: white;
             border-radius: 8px;
@@ -219,7 +214,6 @@
             transition: transform 0.1s ease-out;
         }
         
-        /* Mermaid labels live inside the SVG; this covers them */
         .mermaid, .mermaid svg {
             font-family: system-ui, "Segoe UI", "Microsoft JhengHei", "PingFang TC",
                         "Noto Sans CJK TC", Arial, sans-serif;
@@ -266,27 +260,6 @@
             opacity: 1;
         }
         
-        .speed-control {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            font-size: 12px;
-            margin-bottom: 5px;
-        }
-        
-        .speed-slider {
-            width: 150px;
-        }
-        
-        .status-display {
-            padding: 5px 10px;
-            background-color: var(--vscode-editor-inactiveSelectionBackground);
-            border-radius: 4px;
-            font-family: monospace;
-            font-size: 12px;
-            margin-bottom: 5px;
-        }
-        
         /* 高亮樣式 - 保留原始顏色的發光效果 */
         .highlighted rect,
         .highlighted polygon,
@@ -294,15 +267,6 @@
         .highlighted path {
             filter: drop-shadow(0 0 10px #FFC107) drop-shadow(0 0 20px #FFC107);
             animation: glow 1.5s infinite;
-        }
-        
-        /* 動畫高亮樣式 - 不同顏色 */
-        .animation-highlighted rect,
-        .animation-highlighted polygon,
-        .animation-highlighted ellipse,
-        .animation-highlighted path {
-            filter: drop-shadow(0 0 10px #00BCD4) drop-shadow(0 0 20px #00BCD4);
-            animation: animationGlow 1s infinite;
         }
         
         @keyframes glow {
@@ -317,119 +281,48 @@
             }
         }
         
-        @keyframes animationGlow {
-            0% {
-                filter: drop-shadow(0 0 5px #00BCD4) drop-shadow(0 0 10px #00BCD4);
-            }
-            50% {
-                filter: drop-shadow(0 0 20px #00BCD4) drop-shadow(0 0 35px #00BCD4);
-            }
-            100% {
-                filter: drop-shadow(0 0 5px #00BCD4) drop-shadow(0 0 10px #00BCD4);
-            }
-        }
-        
-        /* 響應式調整 */
-        @media (max-height: 600px) {
-            .flowchart-section {
-                height: 75%;
-            }
-            .output-section {
-                height: 25%;
-            }
-        }
+       
     </style>
 </head>
 <body>
-    <!-- 上方流程圖區域 (80%) -->
+    <!-- 上方流程圖區域 (75%) -->
     <div class="flowchart-section">
-        <div class="header">
-            <h1>PseudoChart</h1>
-        </div>
-        
-        <!-- <div class="controls">
-            <button onclick="resetView()"> Reset View</button>
-            <button onclick="exportSVG()"> Export SVG</button>
-            <button onclick="clearHighlight()"> Clear Highlight</button>
-            <button id="animateBtn" class="animation-control" onclick="startAnimation()"> Animate Flow</button>
-            <button id="stopBtn" class="stop-button" onclick="stopAnimation()" style="display: none;"> Stop</button>
-        </div> -->
         <div class="controls">
             <button id="btnReset"> Reset View</button>
-            <button id="btnExport"> Export SVG</button>
             <button id="btnClear"> Clear Highlight</button>
-            <button id="animateBtn" class="animation-control">▶ Animate Flow</button>
-            <button id="stopBtn" class="stop-button" style="display:none;">⏹ Stop</button>
-        </div>
-        <!-- each button must related to a EventListener; otherwise not work -->
-        
-        
-        <div class="speed-control">
-            <label for="speedSlider">Animation Speed:</label>
-            <input type="range" id="speedSlider" class="speed-slider" min="100" max="2000" value="500" step="100">
-            <span id="speedValue">500ms</span>
         </div>
         
-        <div id="statusDisplay" class="status-display" style="display: none;">
-            Current Node: <span id="currentNodeName">-</span>
-        </div>
-        
-        <!-- <div id="mermaid-container">
-            <div class="zoom-indicator" id="zoomIndicator">100%</div>
-            <div class="drag-indicator" id="dragIndicator">Pan Mode</div>
-            <div id="mermaid-wrapper">
-                <div class="mermaid" id="flowchart">
-                    ${mermaidCode}
-                </div>
-            </div>
-        </div> -->
         <div id="mermaid-container">
             <div class="zoom-indicator" id="zoomIndicator">100%</div>
             <div class="drag-indicator" id="dragIndicator">Pan Mode</div>
             <div id="mermaid-wrapper">
-                <!-- turn HTML into outter file, use placeholder, and replace when load into 'extension.ts' -->
                 <div class="mermaid" id="flowchart">%%MERMAID_CODE%%</div>
             </div>
         </div>
     </div>
     
-    <!-- 下方輸出區域 (20%) -->
+    <!-- 下方輸出區域 (25%) -->
     <div class="output-section">
-        <h3> LLM Pseudo code (Coming Soon)</h3>
-        <div class="output-content">
-            <span>未來整合學長那邊的GPT，感覺完美</span>
+        <div class="output-header">
+            <h3> LLM Pseudocode</h3>
+            <button class="clear-btn" id="btnClearPseudocode">Clear History</button>
+        </div>
+        <div class="output-content" id="pseudocode-content">
+            <pre id="pseudocode-text">%%PSEUDOCODE%%</pre>
         </div>
     </div>
 
-    <!-- turn into outter file, use placeholder, and replace when load into 'extension.ts' -->
-    <!-- all script need nonce tag to pass security limit in extension.ts -->
-    <!-- check comment of getNonce() in extension.ts -->
     <script type="application/json" id="node-order-json" nonce="%%NONCE%%">%%NODE_ORDER_JSON%%</script>
     <script nonce="%%NONCE%%">
-         // Using Eventlistener, instead of onclick
-
-        // “Refused to execute inline event handler …”
-        // → your CSP is blocking inline onclick="..."
-        //   etc. (nonce does not whitelist inline
-        //   event attributes).
-
-        // document.getElementById('btnZoomIn').addEventListener('click', zoomIn);
-        // document.getElementById('btnZoomOut').addEventListener('click', zoomOut);
+        // 事件監聽器設置
         document.getElementById('btnReset').addEventListener('click', resetView);
-        document.getElementById('btnExport').addEventListener('click', exportSVG);
         document.getElementById('btnClear').addEventListener('click', clearHighlightAndEditor);
-        document.getElementById('animateBtn').addEventListener('click', startAnimation);
-        document.getElementById('stopBtn').addEventListener('click', stopAnimation);
+        document.getElementById('btnClearPseudocode').addEventListener('click', clearPseudocodeHistory);
 
         const vscode = acquireVsCodeApi();
         let currentScale = 1;
         let currentHighlightedNodes = [];
-        let animationNodes = []; 
-        let animationTimer = null;
-        let animationIndex = 0;
-        // let nodeOrder = ${JSON.stringify(nodeOrder)};
 
-        // <!-- turn into outter file, use placeholder, and replace when load into 'extension.ts' -->
         const nodeOrderJsonTag = document.getElementById('node-order-json');
         let nodeOrder = [];
         try {
@@ -448,15 +341,6 @@
         let scrollLeft = 0;
         let scrollTop = 0;
         
-        // 速度滑桿控制
-        const speedSlider = document.getElementById('speedSlider');
-        const speedValue = document.getElementById('speedValue');
-        speedSlider.addEventListener('input', (e) => {
-            speedValue.textContent = e.target.value + 'ms';
-        });
-        
-
-
         function initMermaidSafe() {
             if (typeof mermaid === 'undefined') {
                 console.error('Mermaid not loaded');
@@ -467,9 +351,6 @@
                 startOnLoad: true,
                 theme: 'default',
                 flowchart: {
-                    // useMaxWidth: true,
-                    // ?? 2025/09/05 merge 的時候 不太確定這個變動是什麼 by 和豫
-                    // 好像會影響 reset 的大小
                     useMaxWidth: false,
                     htmlLabels: true,
                     curve: 'basis'
@@ -477,36 +358,27 @@
                 securityLevel: 'loose'
             });
             
-            // 當 Mermaid 完成渲染後，自動將流程圖置中
             mermaid.init(undefined, document.querySelector('.mermaid')).then(() => {
                 console.log('Mermaid initialized, node order:', nodeOrder);
                 centerFlowchart();
             });
         }
 
-        // Run after DOM is parsed (deferred external scripts will have executed by now)
         document.addEventListener('DOMContentLoaded', initMermaidSafe);
-     
-
         
-        // 將流程圖置中的函數
         function centerFlowchart() {
             const container = document.getElementById('mermaid-container');
             const wrapper = document.getElementById('mermaid-wrapper');
             const flowchart = document.querySelector('.mermaid svg');
             
             if (container && wrapper && flowchart) {
-                // 等待一小段時間確保渲染完成
                 setTimeout(() => {
-                    // 獲取容器和流程圖的尺寸
                     const containerRect = container.getBoundingClientRect();
                     const wrapperRect = wrapper.getBoundingClientRect();
                     
-                    // 計算置中所需的滾動位置
                     const scrollLeft = (wrapper.scrollWidth - containerRect.width) / 2;
                     const scrollTop = (wrapper.scrollHeight - containerRect.height) / 2;
                     
-                    // 設定滾動位置，讓流程圖出現在中央
                     container.scrollLeft = scrollLeft;
                     container.scrollTop = scrollTop;
                     
@@ -515,50 +387,54 @@
             }
         }
         
-        // 獲取容器元素
         const mermaidContainer = document.getElementById('mermaid-container');
         const zoomIndicator = document.getElementById('zoomIndicator');
         const dragIndicator = document.getElementById('dragIndicator');
-
-
         
-        // ===============================================================
-        // highlight a line of statement, when click on a node element
-        // post message to backend
+        // 清除 Pseudocode 歷史記錄
+        function clearPseudocodeHistory() {
+            vscode.postMessage({ command: 'webview.clearPseudocodeHistory' });
+            const pseudocodeText = document.getElementById('pseudocode-text');
+            if (pseudocodeText) {
+                pseudocodeText.textContent = '等待生成 Pseudocode...';
+            }
+        }
+        
+        // 格式化 Pseudocode 顯示
+        function formatPseudocodeDisplay(text) {
+            // 處理分隔線
+            let formatted = text.replace(/─{50}/g, '<hr class="pseudocode-separator">');
+            
+            // 處理時間戳 (format: [HH:MM:SS])
+            formatted = formatted.replace(/\[(\d{1,2}:\d{2}:\d{2})\]/g, '<span class="pseudocode-timestamp">[$1]</span>');
+            
+            // 處理類型標識
+            formatted = formatted.replace(/(\s)(Function|Class|If Statement|For Loop|While Loop|Try Block|Single Line)(\s)/g, 
+                '$1<span class="pseudocode-type">$2</span>$3');
+            
+            // 處理快取標識
+            formatted = formatted.replace(/\[Cached\]/g, '<span class="pseudocode-cached">[Cached]</span>');
+            
+            return formatted;
+        }
+        
+        // 點擊節點事件
         mermaidContainer.addEventListener('click', (e) => {
-            const el = e.target.closest('.node');   // Mermaid renders nodes as <g class="node">...
+            const el = e.target.closest('.node');
             if (!el) return;
-            // e: event Object; addEventListener callback pass in
-            // e.target:
-            //  the element trigger this event
-            //  e.g., 
-            //      click the <text>  >>>>  e.target === <text>
-            //      click the <rect>  >>>>  e.target === <rect>
-            // Element.closest(selector):
-            //  which is a DOM API
-            //  search from parent to its ancestor; return first match '.node';
-            //      '.node' mean class = "node"
 
-            // Mermaid node <g> ids typically look like "flowchart-node23" or similar
             const rawId = el.id || '';
             let nodeId = rawId.split('-')[1] || rawId;
 
-            // handle special ids
             if (rawId.includes('Start')) nodeId = 'Start';
             if (rawId.includes('End'))   nodeId = 'End';
 
-            // post message to backend
             vscode.postMessage({ command: 'webview.nodeClicked', nodeId });
-            
-            // keep the frontend highlight
             highlightNodes([nodeId]);
         });
-
         
-        
-        // === 拖曳功能實現 ===
+        // 拖曳功能實現
         mermaidContainer.addEventListener('mousedown', (e) => {
-            // 檢查是否點擊在節點上（避免干擾節點點擊事件）
             if (e.target.closest('.node')) {
                 return;
             }
@@ -566,16 +442,13 @@
             isDragging = true;
             mermaidContainer.classList.add('grabbing');
             
-            // 記錄起始位置
             startX = e.pageX - mermaidContainer.offsetLeft;
             startY = e.pageY - mermaidContainer.offsetTop;
             scrollLeft = mermaidContainer.scrollLeft;
             scrollTop = mermaidContainer.scrollTop;
             
-            // 顯示拖曳指示器
             dragIndicator.classList.add('visible');
             
-            // 清除之前的 timeout
             if (dragTimeout) {
                 clearTimeout(dragTimeout);
             }
@@ -588,13 +461,11 @@
             
             e.preventDefault();
             
-            // 計算移動距離
             const x = e.pageX - mermaidContainer.offsetLeft;
             const y = e.pageY - mermaidContainer.offsetTop;
-            const walkX = (x - startX) * 1.5; // 增加移動速度
+            const walkX = (x - startX) * 1.5;
             const walkY = (y - startY) * 1.5;
             
-            // 更新滾動位置
             mermaidContainer.scrollLeft = scrollLeft - walkX;
             mermaidContainer.scrollTop = scrollTop - walkY;
         });
@@ -604,21 +475,18 @@
                 isDragging = false;
                 mermaidContainer.classList.remove('grabbing');
                 
-                // 1秒後隱藏拖曳指示器
                 dragTimeout = setTimeout(() => {
                     dragIndicator.classList.remove('visible');
                 }, 1000);
             }
         });
         
-        // 防止拖曳時選擇文字
         mermaidContainer.addEventListener('selectstart', (e) => {
             if (isDragging) {
                 e.preventDefault();
             }
         });
         
-        // 如果滑鼠離開容器也要停止拖曳
         mermaidContainer.addEventListener('mouseleave', () => {
             if (isDragging) {
                 isDragging = false;
@@ -630,34 +498,26 @@
             }
         });
         
-        // === Ctrl + 滾輪縮放功能 ===
+        // Ctrl + 滾輪縮放功能
         mermaidContainer.addEventListener('wheel', (e) => {
-            // 檢查是否按住 Ctrl 鍵（Windows/Linux）或 Cmd 鍵（Mac）
             if (e.ctrlKey || e.metaKey) {
                 e.preventDefault();
                 
-                // 計算縮放因子
                 const zoomSpeed = 0.1;
                 const delta = e.deltaY > 0 ? -zoomSpeed : zoomSpeed;
-                
-                // 更新縮放比例（限制在 0.1 到 5 之間）
                 const newScale = Math.min(Math.max(0.1, currentScale + delta), 5);
                 
                 if (newScale !== currentScale) {
                     currentScale = newScale;
                     document.querySelector('.mermaid').style.transform = 'scale(' + currentScale + ')';
                     
-                    
-                    // 顯示縮放指示器
                     zoomIndicator.textContent = Math.round(currentScale * 100) + '%';
                     zoomIndicator.classList.add('visible');
                     
-                    // 清除之前的 timeout
                     if (zoomTimeout) {
                         clearTimeout(zoomTimeout);
                     }
                     
-                    // 2秒後隱藏指示器
                     zoomTimeout = setTimeout(() => {
                         zoomIndicator.classList.remove('visible');
                     }, 2000);
@@ -665,7 +525,6 @@
             }
         }, { passive: false });
         
-        // 防止 Ctrl + 滾輪的預設瀏覽器縮放行為
         document.addEventListener('wheel', (e) => {
             if (e.ctrlKey || e.metaKey) {
                 e.preventDefault();
@@ -693,14 +552,11 @@
             return null;
         }
         
-        // nodeIds: Number[]
         function highlightNodes(nodeIds) {
-            //清除之前的高亮
             clearHighlight();
             
             console.log('Highlighting nodes:', nodeIds);
             
-            //高亮新的節點
             nodeIds.forEach((nodeId, index) => {
                 const element = findNodeElement(nodeId);
                 if (element) {
@@ -708,25 +564,20 @@
                     currentHighlightedNodes.push(element);
                     console.log('Highlighted element:', element.id);
                     
-                    // 將第一個高亮的節點置中
                     if (index === 0) {
-                        // 使用 scrollIntoView 並置中顯示
                         element.scrollIntoView({ 
                             behavior: 'smooth', 
                             block: 'center',
                             inline: 'center'
                         });
                         
-                        // 如果有縮放，確保元素在視窗中心
                         const container = document.getElementById('mermaid-container');
                         const rect = element.getBoundingClientRect();
                         const containerRect = container.getBoundingClientRect();
                         
-                        // 計算需要滾動的距離
                         const scrollLeft = container.scrollLeft + rect.left - containerRect.left - (containerRect.width / 2) + (rect.width / 2);
                         const scrollTop = container.scrollTop + rect.top - containerRect.top - (containerRect.height / 2) + (rect.height / 2);
                         
-                        // 平滑滾動到計算出的位置
                         container.scrollTo({
                             left: scrollLeft,
                             top: scrollTop,
@@ -741,98 +592,16 @@
             }
         }
         
-        // DOM-only clear (no postMessage)
         function clearHighlight() {
-            // 移除所有高亮
             currentHighlightedNodes.forEach(el => {
                 el.classList.remove('highlighted');
             });
             currentHighlightedNodes = [];
         }
 
-        // Button-driven clear (DOM + ask extension to clear editor)
         function clearHighlightAndEditor() {
             clearHighlight();
             vscode.postMessage({ command: 'webview.requestClearEditor' });
-        }
-        
-        function clearAnimationHighlight() {
-            // 移除所有動畫高亮
-            animationNodes.forEach(el => {
-                el.classList.remove('animation-highlighted');
-            });
-            animationNodes = [];
-        }
-        
-        function animateNode(nodeId) {
-            clearAnimationHighlight();
-            
-            const element = findNodeElement(nodeId);
-            if (element) {
-                element.classList.add('animation-highlighted');
-                animationNodes.push(element);
-                
-                // 更新狀態顯示
-                const statusDisplay = document.getElementById('statusDisplay');
-                const currentNodeName = document.getElementById('currentNodeName');
-                statusDisplay.style.display = 'block';
-                
-                // 從節點中提取文字內容
-                const textElement = element.querySelector('text') || element.querySelector('.nodeLabel');
-                if (textElement) {
-                    currentNodeName.textContent = nodeId + ': ' + textElement.textContent;
-                } else {
-                    currentNodeName.textContent = nodeId;
-                }
-                
-                // 滾動到當前節點
-                element.scrollIntoView({ behavior: 'smooth', block: 'center' });
-            }
-        }
-        
-        function startAnimation() {
-            if (animationTimer) {
-                stopAnimation();
-            }
-            
-            animationIndex = 0;
-            const animateBtn = document.getElementById('animateBtn');
-            const stopBtn = document.getElementById('stopBtn');
-            animateBtn.style.display = 'none';
-            stopBtn.style.display = 'inline-block';
-            
-            const speed = parseInt(speedSlider.value);
-            
-            function nextNode() {
-                if (animationIndex < nodeOrder.length) {
-                    animateNode(nodeOrder[animationIndex]);
-                    animationIndex++;
-                    animationTimer = setTimeout(nextNode, speed);
-                } else {
-                    // 動畫結束
-                    stopAnimation();
-                }
-            }
-            
-            nextNode();
-        }
-        
-        function stopAnimation() {
-            if (animationTimer) {
-                clearTimeout(animationTimer);
-                animationTimer = null;
-            }
-            
-            clearAnimationHighlight();
-            
-            const animateBtn = document.getElementById('animateBtn');
-            const stopBtn = document.getElementById('stopBtn');
-            animateBtn.style.display = 'inline-block';
-            stopBtn.style.display = 'none';
-            
-            // 隱藏狀態顯示
-            const statusDisplay = document.getElementById('statusDisplay');
-            statusDisplay.style.display = 'none';
         }
         
         // 監聽來自擴展的消息
@@ -840,10 +609,6 @@
             const message = event.data;
             switch (message.command) {
                 case 'highlightNodes':
-                    // 如果正在播放動畫，先停止
-                    if (animationTimer) {
-                        stopAnimation();
-                    }
                     highlightNodes(message.nodeIds);
                     break;
                 case 'clearHighlight':
@@ -853,46 +618,41 @@
                     nodeOrder = message.nodeOrder;
                     console.log('Updated node order:', nodeOrder);
                     break;
+                case 'updatePseudocode':
+                    // 更新 pseudocode 顯示
+                    const pseudocodeText = document.getElementById('pseudocode-text');
+                    if (pseudocodeText) {
+                        // 使用 innerHTML 來支援 HTML 格式化
+                        pseudocodeText.innerHTML = formatPseudocodeDisplay(message.pseudocode);
+                        // 自動滾動到底部顯示最新內容
+                        const outputContent = document.getElementById('pseudocode-content');
+                        if (outputContent) {
+                            outputContent.scrollTop = outputContent.scrollHeight;
+                        }
+                    }
+                    break;
             }
         });
         
         function resetView() {
-            // 重置縮放
             currentScale = 1;
             document.querySelector('.mermaid').style.transform = 'scale(1)';
-            
-            // 重新置中流程圖
             centerFlowchart();
             
-            // 顯示縮放指示器
             zoomIndicator.textContent = '100%';
             zoomIndicator.classList.add('visible');
             
-            // 清除之前的 timeout
             if (zoomTimeout) {
                 clearTimeout(zoomTimeout);
             }
             
-            // 2秒後隱藏指示器
             zoomTimeout = setTimeout(() => {
                 zoomIndicator.classList.remove('visible');
             }, 2000);
         }
         
-        // 舊的 resetZoom 函數保留以維持相容性
         function resetZoom() {
             resetView();
-        }
-        
-        function exportSVG() {
-            const svg = document.querySelector('.mermaid svg');
-            const svgData = new XMLSerializer().serializeToString(svg);
-            const blob = new Blob([svgData], { type: 'image/svg+xml' });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = 'python-flowchart.svg';
-            a.click();
         }
     </script>
 </body>

@@ -6,7 +6,6 @@ import { spawn } from 'child_process';
 import { codeToPseudocode } from './claudeApi';
 import { PythonCodeBlockParser, CodeBlock, CodeBlockType } from './codeBlockParser';
 import * as dotenv from 'dotenv';
-import { askGeminiSortCode } from './SortAnimationGemini';
 // import { languageChoose } from './LanguageAnalyzer';
 import { parsePythonWithAST } from './pythonAnalyzer';
 import { WebViewNodeClickEventHandler, clearEditor } from './WebviewEventHandler';
@@ -25,6 +24,9 @@ let pseudocodePanel: vscode.WebviewPanel | undefined;
 
 // 快取管理 - 存儲程式碼區塊與 pseudocode 的對應
 const pseudocodeCache = new Map<string, string>();
+
+// 儲存累積的 pseudocode 歷史記錄
+let pseudocodeHistory: string[] = [];
 
 // 儲存 nodeID 對應到 LineNum, Label 的關係
 // parseNodeSequence: 
@@ -85,16 +87,21 @@ export function activate(context: vscode.ExtensionContext) {
         }
     });
 
-    // 註冊 Hover Provider
+    // 註冊 Hover Provider - 只在 hover 時生成 pseudocode 並顯示在右下角
     const hoverProvider = vscode.languages.registerHoverProvider(
         ['python'],
         {
             async provideHover(document, position, token) {
+                // 如果沒有開啟 flowchart panel，不執行任何動作
+                if (!currentPanel) {
+                    return null;
+                }
+
                 // 獲取當前行內容，用於初步檢查
                 const line = document.lineAt(position.line);
                 const lineText = line.text.trim();
 
-                // 只在有程式碼內容的行才顯示（跳過 Python 註解和空行）
+                // 只在有程式碼內容的行才處理（跳過 Python 註解和空行）
                 if (!lineText || lineText.startsWith('#')) {
                     return null;
                 }
@@ -102,9 +109,8 @@ export function activate(context: vscode.ExtensionContext) {
                 // 檢查 API Key
                 const apiKey = process.env.CLAUDE_API_KEY;
                 if (!apiKey) {
-                    const errorMessage = new vscode.MarkdownString();
-                    errorMessage.appendCodeblock('❌ 找不到 CLAUDE_API_KEY', 'text');
-                    return new vscode.Hover(errorMessage);
+                    console.error('CLAUDE_API_KEY not found');
+                    return null;
                 }
 
                 // 判斷當前行是否為區塊開始行
@@ -129,45 +135,35 @@ export function activate(context: vscode.ExtensionContext) {
                     cacheKey = lineText;
                 }
 
-                // 檢查快取
-                if (pseudocodeCache.has(cacheKey)) {
-                    const cachedPseudocode = pseudocodeCache.get(cacheKey)!;
-
-                    // 顯示快取結果
-                    const resultMessage = new vscode.MarkdownString();
-                    resultMessage.appendCodeblock(`📝 Pseudocode (快取)
-${getBlockTypeDisplay(codeBlock.type)} (Lines ${codeBlock.startLine + 1}-${codeBlock.endLine + 1})
-
-${cachedPseudocode}`, 'text');
-
-                    return new vscode.Hover(resultMessage);
+                // 在背景生成 pseudocode
+                if (!pseudocodeCache.has(cacheKey)) {
+                    // 異步生成，不阻塞 hover
+                    codeToPseudocode(codeBlock.code).then(pseudocode => {
+                        pseudocodeCache.set(cacheKey, pseudocode);
+                        const formattedPseudocode = formatPseudocodeForDisplay(
+                            pseudocode,
+                            codeBlock,
+                            false
+                        );
+                        addToPseudocodeHistory(formattedPseudocode);
+                        updateWebviewPseudocode();
+                    }).catch(error => {
+                        console.error('Failed to generate pseudocode:', error);
+                    });
+                } else {
+                    // 從快取取得並更新顯示
+                    const pseudocode = pseudocodeCache.get(cacheKey)!;
+                    const formattedPseudocode = formatPseudocodeForDisplay(
+                        pseudocode,
+                        codeBlock,
+                        true
+                    );
+                    addToPseudocodeHistory(formattedPseudocode);
+                    updateWebviewPseudocode();
                 }
 
-                try {
-                    // 呼叫 API 轉換程式碼區塊
-                    const pseudocode = await codeToPseudocode(codeBlock.code);
-
-                    // 存入快取
-                    pseudocodeCache.set(cacheKey, pseudocode);
-
-                    // 顯示結果
-                    const resultMessage = new vscode.MarkdownString();
-                    resultMessage.appendCodeblock(`📝 Pseudocode
-${getBlockTypeDisplay(codeBlock.type)} (Lines ${codeBlock.startLine + 1}-${codeBlock.endLine + 1})
-
-${pseudocode}`, 'text');
-
-                    return new vscode.Hover(resultMessage);
-
-                } catch (error) {
-                    // 錯誤處理
-                    const errorMessage = new vscode.MarkdownString();
-                    errorMessage.appendCodeblock(`❌ 轉換失敗
-${getBlockTypeDisplay(codeBlock.type)} (Lines ${codeBlock.startLine + 1}-${codeBlock.endLine + 1})
-錯誤: ${(error as Error).message}`, 'text');
-
-                    return new vscode.Hover(errorMessage);
-                }
+                // 不返回任何 Hover 內容
+                return null;
             }
         }
     );
@@ -193,10 +189,17 @@ ${getBlockTypeDisplay(codeBlock.type)} (Lines ${codeBlock.startLine + 1}-${codeB
             //使用 Python AST 來解析程式碼，並獲取每一行的對應關係
             const { mermaidCode, lineMapping, nodeSequence, nodeMeta } = await parsePythonWithAST(code);
             
+            
             console.log('Generated Mermaid code:');
             console.log(mermaidCode);
             console.log('Line mapping:', lineMapping);
             console.log('Node sequence:', nodeSequence);
+
+            // 清空 pseudocode 歷史記錄
+            pseudocodeHistory = [];
+            
+            // 不自動生成整個程式的 pseudocode，只顯示等待訊息
+            let pseudocodeText = '等待生成 Pseudocode...';
             
             //解析每一行的對應關系
             lineToNodeMap = parseLineMapping(lineMapping);
@@ -224,6 +227,8 @@ ${getBlockTypeDisplay(codeBlock.type)} (Lines ${codeBlock.startLine + 1}-${codeB
 
                 currentPanel.onDidDispose(() => {
                     currentPanel = undefined;
+                    // 清空歷史記錄
+                    pseudocodeHistory = [];
                 });
             }
 
@@ -232,7 +237,8 @@ ${getBlockTypeDisplay(codeBlock.type)} (Lines ${codeBlock.startLine + 1}-${codeB
                 currentPanel.webview,
                 context,
                 mermaidCode,
-                nodeOrder
+                nodeOrder,
+                getPseudocodeHistoryText()
             );
             
             //監聽來自 webview 的消息
@@ -256,6 +262,11 @@ ${getBlockTypeDisplay(codeBlock.type)} (Lines ${codeBlock.startLine + 1}-${codeB
                             clearEditor(editor);
                             break;
                         }
+                        case 'webview.clearPseudocodeHistory':
+                            // 清空 pseudocode 歷史記錄
+                            pseudocodeHistory = [];
+                            updateWebviewPseudocode();
+                            break;
                     }
                 },
                 undefined,
@@ -267,6 +278,12 @@ ${getBlockTypeDisplay(codeBlock.type)} (Lines ${codeBlock.startLine + 1}-${codeB
         }
     });
 
+    // 註冊清空 pseudocode 歷史的命令
+    const clearHistoryDisposable = vscode.commands.registerCommand('code2pseudocode.clearHistory', () => {
+        pseudocodeHistory = [];
+        updateWebviewPseudocode();
+        vscode.window.showInformationMessage('Pseudocode history cleared');
+    });
     
     //游標位置變化的資訊
     let selectionDisposable = vscode.window.onDidChangeTextEditorSelection((e) => {
@@ -348,7 +365,45 @@ ${getBlockTypeDisplay(codeBlock.type)} (Lines ${codeBlock.startLine + 1}-${codeB
 
     context.subscriptions.push(generateDisposable);
     context.subscriptions.push(selectionDisposable);
-    context.subscriptions.push(disposable, onSaveDisposable, onChangeDisposable, hoverProvider);
+    context.subscriptions.push(disposable, onSaveDisposable, onChangeDisposable, hoverProvider, clearHistoryDisposable);
+}
+
+// 新增：格式化 pseudocode 以供顯示
+function formatPseudocodeForDisplay(pseudocode: string, codeBlock: CodeBlock, fromCache: boolean): string {
+    const timestamp = new Date().toLocaleTimeString();
+    const typeDisplay = getBlockTypeDisplay(codeBlock.type);
+    const lineInfo = `Lines ${codeBlock.startLine + 1}-${codeBlock.endLine + 1}`;
+    const cacheStatus = fromCache ? ' [Cached]' : '';
+    
+    return `[${timestamp}] ${typeDisplay} (${lineInfo})${cacheStatus}\n${pseudocode}`;
+}
+
+// 新增：添加到 pseudocode 歷史記錄
+function addToPseudocodeHistory(pseudocode: string) {
+    pseudocodeHistory.push(pseudocode);
+    // 限制歷史記錄數量，避免過多
+    const maxHistory = 20;
+    if (pseudocodeHistory.length > maxHistory) {
+        pseudocodeHistory = pseudocodeHistory.slice(-maxHistory);
+    }
+}
+
+// 新增：獲取格式化的歷史記錄文本
+function getPseudocodeHistoryText(): string {
+    if (pseudocodeHistory.length === 0) {
+        return '等待生成 Pseudocode...';
+    }
+    return pseudocodeHistory.join('\n' + '─'.repeat(50) + '\n');
+}
+
+// 新增：更新 webview 中的 pseudocode 顯示
+function updateWebviewPseudocode() {
+    if (currentPanel) {
+        currentPanel.webview.postMessage({
+            command: 'updatePseudocode',
+            pseudocode: getPseudocodeHistoryText()
+        });
+    }
 }
 
 // helper
@@ -415,7 +470,7 @@ async function parseNodeSequence(sequenceStr: string, nodeMeta: string, fullCode
 
     // interact with LLM
     let sortResult: string[] = sequence;// default to be old version, if LLM failed
-    sortResult = await askGeminiSortCode(orderedForLLM, fullCode);
+    
     return sortResult;
 }
 
@@ -430,16 +485,6 @@ function parseNodeMeta(metaStr: string): NodeMeta {
   catch (e) { console.error('Error parsing node meta:', e); return {}; }
 }
 
-
-
-// What is getNonce() and why we need it?
-// What: a tiny helper that generates a random string (the “nonce”).
-// Why: Your Webview uses a Content Security Policy (CSP) that blocks inline scripts unless they carry a matching nonce.
-// We put the same nonce in:
-// the CSP meta (script-src 'nonce-XYZ'), and
-// each <script nonce="XYZ"> tag.
-// This tells the Webview: “these inline scripts are allowed.”
-// A simple implementation in extension.ts:
 function getNonce(): string {
   const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
   let nonce = '';
@@ -447,16 +492,12 @@ function getNonce(): string {
   return nonce;
 }
 
-
-
-// Webview 內容（修改以包含新按鈕和動畫功能）
-// Webview 內容（修正版本）
-// turn into load from 'media/flowview.html'
 async function getWebviewHtmlExternal(
     webview: vscode.Webview,
     context: vscode.ExtensionContext,
     mermaidCode: string,
-    nodeOrder: string[]
+    nodeOrder: string[],
+    pseudocode: string = ''
 ): Promise<string> {
     // 1) read the template file
     const templateUri = vscode.Uri.joinPath(context.extensionUri, 'media', 'flowview.html');
@@ -477,7 +518,8 @@ async function getWebviewHtmlExternal(
         .replace(/%%NONCE%%/g, nonce)
         .replace(/%%MERMAID_JS_URI%%/g, mermaidUri.toString())
         .replace(/%%MERMAID_CODE%%/g, mermaidCode)
-        .replace(/%%NODE_ORDER_JSON%%/g, JSON.stringify(nodeOrder));
+        .replace(/%%NODE_ORDER_JSON%%/g, JSON.stringify(nodeOrder))
+        .replace(/%%PSEUDOCODE%%/g, escapeHtml(pseudocode)); 
 
     return html;
 }
@@ -508,32 +550,26 @@ function isBlockStart(lineText: string): boolean {
         trimmed.startsWith('match ');
 }
 
-
-
-
 function getBlockTypeDisplay(type: CodeBlockType): string {
     switch (type) {
         case CodeBlockType.FUNCTION:
-            return '🔧 Function';
+            return ' Function';
         case CodeBlockType.CLASS:
-            return '🏗️ Class';
+            return ' Class';
         case CodeBlockType.IF:
-            return '🔀 If Statement';
+            return ' If Statement';
         case CodeBlockType.FOR:
-            return '🔄 For Loop';
+            return ' For Loop';
         case CodeBlockType.WHILE:
-            return '🔁 While Loop';
+            return ' While Loop';
         case CodeBlockType.TRY:
-            return '🛡️ Try Block';
+            return ' Try Block';
         case CodeBlockType.SINGLE_LINE:
-            return '📝 Single Line';
+            return ' Single Line';
         default:
-            return '📋 Code Block';
+            return ' Code Block';
     }
 }
-
-
-
 
 /**
  * 執行程式碼轉換為 pseudocode 的核心邏輯
@@ -600,9 +636,6 @@ async function convertToPseudocode(isAutoUpdate: boolean = false) {
     });
 }
 
-
-
-
 /**
  * 創建分割視窗顯示 pseudocode
  */
@@ -632,10 +665,6 @@ async function showPseudocodePanel(pseudocode: string) {
     // 設置 WebView 內容
     pseudocodePanel.webview.html = getPseudocodeWebviewContent(pseudocode);
 }
-
-
-
-
 
 /**
  * 生成 Pseudocode WebView 的 HTML 內容
@@ -685,7 +714,7 @@ function getPseudocodeWebviewContent(pseudocode: string): string {
     </head>
     <body>
         <div class="container">
-            <h2>🔄 Pseudocode</h2>
+            <h2> Pseudocode</h2>
             <div class="code-block pseudocode">${escapeHtml(pseudocode)}</div>
         </div>
     </body>
@@ -704,9 +733,12 @@ function escapeHtml(text: string): string {
         .replace(/"/g, '&quot;')
         .replace(/'/g, '&#039;');
 }
-    export function deactivate() {
-        if (currentPanel) {
-            currentPanel.dispose();
-        }
-        
+
+export function deactivate() {
+    if (currentPanel) {
+        currentPanel.dispose();
     }
+    if (pseudocodePanel) {
+        pseudocodePanel.dispose();
+    }
+}

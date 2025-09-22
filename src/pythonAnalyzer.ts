@@ -269,8 +269,16 @@ class FlowchartGenerator(ast.NodeVisitor):
         if end_node not in self.node_sequence:
             self.node_sequence.append(end_node)
         
-        # 處理可能的分支合併情況
-        if self.branch_ends:
+        # 處理最終連接到 End 節點的邏輯
+        # 優先使用 current_node（主程式最後執行的節點）
+        if self.current_node:
+            if self.current_node == self.pending_no_label:
+                self.add_edge(self.current_node, end_node, 'No')
+                self.pending_no_label = None
+            else:
+                self.add_edge(self.current_node, end_node)
+        # 如果沒有 current_node，再處理分支合併的情況
+        elif self.branch_ends:
             for end_node_id in self.branch_ends:
                 if end_node_id:
                     if end_node_id == self.pending_no_label:
@@ -279,12 +287,6 @@ class FlowchartGenerator(ast.NodeVisitor):
                     else:
                         self.add_edge(end_node_id, end_node)
             self.branch_ends = []
-        elif self.current_node:
-            if self.current_node == self.pending_no_label:
-                self.add_edge(self.current_node, end_node, 'No')
-                self.pending_no_label = None
-            else:
-                self.add_edge(self.current_node, end_node)
     
     def visit_Import(self, node):
         """處理 import 語句"""
@@ -292,8 +294,8 @@ class FlowchartGenerator(ast.NodeVisitor):
             return  # 不可達程式碼
             
         node_id = self.get_next_id()
-        import_names = ', '.join([alias.name for alias in node.names])
-        self.add_node(node_id, f'import {import_names}', 'rectangle', 'fill:#fff3e0,stroke:#e65100,stroke-width:2px', node)
+        import_names = ', '.join([alias.name if not alias.asname else f'{alias.name} as {alias.asname}' for alias in node.names])
+        self.add_node(node_id, f'import {import_names}', 'rectangle','fill:#fff3e0,stroke:#e65100,stroke-width:2px', node)
         if self.current_node:
             self.add_edge(self.current_node, node_id)
         self.current_node = node_id
