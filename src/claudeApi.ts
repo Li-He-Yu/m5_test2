@@ -1,11 +1,52 @@
 import axios from 'axios';
 
-/**
- * 呼叫 Claude API，將程式碼轉換為 pseudocode
- * @param code - 原始程式碼
- * @returns pseudocode
- */
-export async function codeToPseudocode(code: string): Promise<string> {
+export interface LineMapping {
+    pythonLine: number;
+    pseudocodeLine: number;
+}
+
+export interface PseudocodeResult {
+    pseudocode: string;
+    lineMapping: LineMapping[];
+}
+
+function buildLineMapping(pythonCode: string, pseudocode: string): LineMapping[] {
+    if (!pythonCode || !pseudocode) {
+        console.warn('buildLineMapping: pythonCode or pseudocode is empty');
+        return [];
+    }
+
+    const pythonLines = pythonCode.split('\n');
+    const pseudoLines = pseudocode.split('\n');
+    
+    const mapping: LineMapping[] = [];
+    let pseudoIndex = 0;
+    
+    for (let pythonIndex = 0; pythonIndex < pythonLines.length; pythonIndex++) {
+        const pythonLine = pythonLines[pythonIndex].trim();
+        
+        if (pythonLine === '' || pythonLine.startsWith('#')) {
+            continue;
+        }
+        
+        while (pseudoIndex < pseudoLines.length && pseudoLines[pseudoIndex].trim() === '') {
+            pseudoIndex++;
+        }
+        
+        if (pseudoIndex < pseudoLines.length) {
+            mapping.push({
+                pythonLine: pythonIndex + 1,
+                pseudocodeLine: pseudoIndex + 1
+            });
+            pseudoIndex++;
+        }
+    }
+    
+    console.log('Line mapping created:', mapping.length, 'mappings');
+    return mapping;
+}
+
+export async function codeToPseudocode(code: string): Promise<PseudocodeResult> {
     const apiKey = process.env.CLAUDE_API_KEY;
     console.log('在 claudeApi.ts 中檢查 API Key:', !!apiKey);
     console.log('所有環境變數:', Object.keys(process.env).filter(key => key.includes('CLAUDE')));
@@ -14,16 +55,21 @@ export async function codeToPseudocode(code: string): Promise<string> {
         throw new Error('找不到 CLAUDE_API_KEY，請檢查 .env 檔案。當前環境變數中沒有此 Key。');
     }
 
-    // 使用新版 Messages API
+    if (!code || code.trim() === '') {
+        throw new Error('輸入的程式碼為空');
+    }
+
     const endpoint = 'https://api.anthropic.com/v1/messages';
     const userMessage = `
-You are a code explainer. Your task is to convert any given code into step-by-step pseudocode format. Follow these strict guidelines:
+You are a code to pseudocode converter. Your task is to convert any given code into pseudocode format. Follow these strict guidelines:
 
 ### Output Requirements
 
-- ONLY output the explanation, no comments, or additional text
+- ONLY output pseudocode, no explanations, comments, or additional text
 - Use consistent terminology and structure across all conversions
 - Write in clear, readable English-like syntax
+- Skip blank lines and comments - only convert actual code statements
+- Preserve the indentation structure of the original code
 
 ### Example Input/Output Format
 <examples>
@@ -38,13 +84,9 @@ for i in range(5):
 </user>
 <answer>
 
-Printing a pattern:
-
-Step 1: Start outer loop with counter i from 0 to 4
-Step 2: For each i, start inner loop with counter j from 0 to 4
-Step 3: For each j, print the number 4
-Step 4: After inner loop completes, go back to Step 1 for next i
-Step 5: Stop when all loops complete (25 times total)
+FOR i FROM 0 TO 4 DO
+    FOR j FROM 0 TO 4 DO
+        OUTPUT 4
 
 </answer>
 </example>
@@ -66,23 +108,15 @@ if a==1:
 </user>
 <answer>
 
-Checking value of a:
-
-Step 1: Check if a equals 1
-→ If yes, go to Step 2
-→ If no, end (no output)
-Step 2: Check if a equals 2
-→ If yes, print 1 and end
-→ If no, go to Step 3
-Step 3: Check if a equals 3
-→ If yes, print 2 and end
-→ If no, go to Step 4
-Step 4: Check if a equals 5
-→ If yes, print 5 and end
-→ If no, go to Step 5
-Step 5: Print 3 and end
-
-Note: Logic issue - if a=1, it cannot equal 2, 3, or 5, so always prints 3
+IF a = 1 THEN
+    IF a = 2 THEN
+        OUTPUT 1
+    ELSE IF a = 3 THEN
+        OUTPUT 2
+    ELSE IF a = 5 THEN
+        OUTPUT 5
+    ELSE
+        OUTPUT 3
 
 </answer>
 </example>
@@ -97,61 +131,104 @@ def fib(n):
 </user>
 <answer>
 
-Finding the n-th Fibonacci number:
+FUNCTION fib(n)
+    IF n > 1 THEN
+        RETURNS fib(n-1) + fib(n-2)
+    RETURNS n
 
-Step 1: Look at the value of n
-Step 2: Is n bigger than 1?
-→ If yes, go to Step 3
-→ If no, go to Step 4
-Step 3: Get Fibonacci(n-1) + Fibonacci(n-2)
-Return this sum
-Step 4: Return n (which is either 0 or 1)
+</answer>
+</example>
+
+<example>
+<user>
+
+x = 5
+y = x + 3
+print(y)
+
+</user>
+<answer>
+
+SET x = 5
+SET y = x + 3
+OUTPUT y
 
 </answer>
 </example>
 
 </examples>
 
-## explanation Style Guidelines
+## Pseudocode Style Guidelines
 
-### Format Rules
+### Control Structures
 
-- Start with a title describing the overall purpose
-- Use "Step X:" format for each step
-- Use arrow symbols (→) for conditional branches
-- Indent sub-conditions or actions under their parent step
-- Keep steps sequential and easy to follow
+-IF condition THEN (one line)
+-ELSE IF condition THEN (one line)
+-ELSE (one line)
+-WHILE condition DO (one line)
+-FOR variable FROM start TO end DO (one line)
+-FOR EACH item IN collection DO (one line)
+-REPEAT (one line)
+-UNTIL condition (one line)
+-BREAK (one line)
+-CONTINUE (one line)
 
-### Content Structure
+### Functions
 
-- Title: Brief description of what the code does
-- Steps: Numbered sequence of actions
-- Conditions: Clear yes/no or true/false branches
-- Actions: What happens at each step
-- Notes: Add only if there's a logic issue or important observation
+-FUNCTION functionName(parameters) (one line)
+-RETURNS value (one line)
+-CALL functionName(arguments) (one line)
 
-### Language Style
+### Variables and Operations
 
-- Use simple action words (Check, Look at, Get, Return, Print)
-- Be specific about values when helpful
-- Use parentheses for clarification
-- Keep each step concise and clear
+-SET variable = value (one line)
+-INPUT variable (one line)
+-OUTPUT expression (one line)
+-INCREMENT variable (one line)
+-DECREMENT variable (one line)
 
-### Avoid
+### Data Structures
 
--Programming syntax or code
-- Technical jargon
-- Overly complex explanations
-- Unnecessary detail
+-SET items = [...] for lists (one line)
+-SET data = {...} for dictionaries (one line)
+-APPEND item TO list (one line)
+-REMOVE item FROM list (one line)
+-SET variable = LENGTH OF collection (one line)
 
-When given code, respond with only the step-by-step pseudocode using the above conventions:\n${code}`;
+### Logical Operators
+
+-Use AND, OR, NOT
+-Use =, ≠, <, >, ≤, ≥
+
+### File Operations
+
+-OPEN filename AS file (one line)
+-READ line FROM file (one line)
+-WRITE data TO file (one line)
+-CLOSE file (one line)
+
+### Exception Handling
+
+-TRY (one line)
+-EXCEPT exception (one line)
+-FINALLY (one line)
+
+### Important Rules
+
+- One Python statement = One pseudocode line
+- Maintain the exact same indentation level as the original code (use 4 spaces per indentation level to match Python convention)
+- Do not add extra lines for END IF, END WHILE, END FUNCTION, etc.
+- Preserve the logical flow and structure of the original code
+- Nested structures should have correspondingly deeper indentation
+
+When given code, respond with only the pseudocode using the above conventions:\n${code}`;
 
     try {
         const response = await axios.post(
             endpoint,
             {
-                model: 'claude-3-7-sonnet-20250219',
-                max_tokens: 1024,
+                model: 'claude-sonnet-4-20250514',
+                max_tokens: 2048,
                 messages: [
                     {
                         role: 'user',
@@ -168,15 +245,34 @@ When given code, respond with only the step-by-step pseudocode using the above c
             }
         );
 
-        return response.data.content[0].text;
+        if (!response.data || !response.data.content || !response.data.content[0]) {
+            throw new Error('API 返回格式錯誤');
+        }
+
+        const pseudocode = response.data.content[0].text;
+        
+        if (!pseudocode || typeof pseudocode !== 'string') {
+            throw new Error('API 返回的 pseudocode 無效');
+        }
+
+        console.log('Pseudocode received, length:', pseudocode.length);
+        
+        const lineMapping = buildLineMapping(code, pseudocode);
+
+        return {
+            pseudocode,
+            lineMapping
+        };
     } catch (err: any) {
+        console.error('codeToPseudocode error:', err);
+        
         if (err.response) {
-            // API 回傳的錯誤
             console.error('API 錯誤詳情:', err.response.data);
             throw new Error(`Claude API 請求失敗 (${err.response.status}): ${err.response.data.error?.message || err.message}`);
-        } else {
-            // 網路或其他錯誤
+        } else if (err.message) {
             throw new Error('Claude API 請求失敗: ' + err.message);
+        } else {
+            throw new Error('未知錯誤: ' + String(err));
         }
     }
-} 
+}

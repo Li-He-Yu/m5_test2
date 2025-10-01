@@ -34,17 +34,15 @@
             flex-direction: column;
         }
         
-        /* 上方流程圖區域 - 65% */
         .flowchart-section {
             height: 65%;
             display: flex;
             flex-direction: column;
             padding: 10px;
             overflow: hidden;
-            border-bottom: 2px solid var(--vscode-panel-border);
+            border-top: 2px solid var(--vscode-panel-border);
         }
         
-        /* 下方預留區域 - 35% */
         .output-section {
             height: 35%;
             padding: 10px;
@@ -86,58 +84,67 @@
 
         .output-content {
             flex: 1;
-            padding: 10px;
+            padding: 0;
             background-color: var(--vscode-editor-background);
             border: 1px solid var(--vscode-panel-border);
             border-radius: 4px;
-            font-family: 'Courier New', monospace;
-            font-size: 12px;
             overflow-y: auto;
-            color: var(--vscode-editor-foreground);
-            text-align: left;
             min-height: 0;
         }
 
-        .output-content pre {
-            margin: 0;
-            white-space: pre-wrap;
-            word-wrap: break-word;
-            font-family: 'Courier New', Consolas, 'Monaco', monospace;
-            font-size: 12px;
-            line-height: 1.4;
-            color: var(--vscode-editor-foreground);
-        }
-
-        .output-content pre:empty::after {
+        .output-content:empty::after {
             content: "等待生成 Pseudocode...";
             color: #888;
             font-style: italic;
+            display: block;
+            padding: 10px;
         }
 
-        /* 分隔線樣式 */
-        .pseudocode-separator {
-            border-top: 1px dashed var(--vscode-panel-border);
-            margin: 10px 0;
-            opacity: 0.5;
+        .pseudocode-line {
+            padding: 2px 10px;
+            font-family: 'Courier New', Consolas, 'Monaco', monospace;
+            font-size: 12px;
+            line-height: 1.6;
+            color: var(--vscode-editor-foreground);
+            border-left: 3px solid transparent;
+            transition: all 0.2s ease;
+            white-space: pre-wrap;
+            word-wrap: break-word;
         }
 
-        /* 時間戳樣式 */
-        .pseudocode-timestamp {
-            color: var(--vscode-descriptionForeground);
-            font-size: 11px;
-            font-style: italic;
+        .pseudocode-line:hover {
+            background-color: rgba(255, 255, 255, 0.03);
         }
 
-        /* 區塊類型標識樣式 */
-        .pseudocode-type {
-            color: var(--vscode-symbolIcon-functionForeground);
+        .pseudocode-line.highlighted {
+            background-color: rgba(255, 193, 7, 0.15);
+            border-left-color: #FFC107;
+            animation: pseudoGlow 1.5s infinite;
+        }
+
+        @keyframes pseudoGlow {
+            0%, 100% {
+                box-shadow: inset 3px 0 5px rgba(255, 193, 7, 0.3);
+            }
+            50% {
+                box-shadow: inset 3px 0 10px rgba(255, 193, 7, 0.5);
+            }
+        }
+
+        .line-number {
+            display: inline-block;
+            width: 40px;
+            color: var(--vscode-editorLineNumber-foreground);
+            text-align: right;
+            margin-right: 15px;
+            user-select: none;
+            opacity: 0.6;
+        }
+
+        .pseudocode-line.highlighted .line-number {
+            color: #FFC107;
+            opacity: 1;
             font-weight: bold;
-        }
-
-        /* 快取標識樣式 */
-        .pseudocode-cached {
-            color: var(--vscode-charts-orange);
-            font-size: 11px;
         }
 
         .header {
@@ -219,7 +226,6 @@
                         "Noto Sans CJK TC", Arial, sans-serif;
         }
         
-        /* 縮放指示器 */
         .zoom-indicator {
             position: absolute;
             top: 10px;
@@ -240,7 +246,6 @@
             opacity: 1;
         }
         
-        /* 拖曳模式指示器 */
         .drag-indicator {
             position: absolute;
             top: 10px;
@@ -260,7 +265,6 @@
             opacity: 1;
         }
         
-        /* 高亮樣式 - 保留原始顏色的發光效果 */
         .highlighted rect,
         .highlighted polygon,
         .highlighted ellipse,
@@ -280,16 +284,22 @@
                 filter: drop-shadow(0 0 5px #FFC107) drop-shadow(0 0 10px #FFC107);
             }
         }
-        
-       
     </style>
 </head>
 <body>
-    <!-- 上方流程圖區域 (75%) -->
+    <div class="output-section">
+        <div class="output-header">
+            <h3>LLM Pseudocode</h3>
+            <button class="clear-btn" id="btnClearPseudocode">Clear History</button>
+        </div>
+        <div class="output-content" id="pseudocode-content">
+        </div>
+    </div>
+
     <div class="flowchart-section">
         <div class="controls">
-            <button id="btnReset"> Reset View</button>
-            <button id="btnClear"> Clear Highlight</button>
+            <button id="btnReset">Reset View</button>
+            <button id="btnClear">Clear Highlight</button>
         </div>
         
         <div id="mermaid-container">
@@ -300,21 +310,9 @@
             </div>
         </div>
     </div>
-    
-    <!-- 下方輸出區域 (25%) -->
-    <div class="output-section">
-        <div class="output-header">
-            <h3> LLM Pseudocode</h3>
-            <button class="clear-btn" id="btnClearPseudocode">Clear History</button>
-        </div>
-        <div class="output-content" id="pseudocode-content">
-            <pre id="pseudocode-text">%%PSEUDOCODE%%</pre>
-        </div>
-    </div>
 
     <script type="application/json" id="node-order-json" nonce="%%NONCE%%">%%NODE_ORDER_JSON%%</script>
     <script nonce="%%NONCE%%">
-        // 事件監聽器設置
         document.getElementById('btnReset').addEventListener('click', resetView);
         document.getElementById('btnClear').addEventListener('click', clearHighlightAndEditor);
         document.getElementById('btnClearPseudocode').addEventListener('click', clearPseudocodeHistory);
@@ -322,6 +320,8 @@
         const vscode = acquireVsCodeApi();
         let currentScale = 1;
         let currentHighlightedNodes = [];
+        let currentHighlightedPseudocodeLines = [];
+        let lineMapping = {};
 
         const nodeOrderJsonTag = document.getElementById('node-order-json');
         let nodeOrder = [];
@@ -334,7 +334,6 @@
         let zoomTimeout = null;
         let dragTimeout = null;
         
-        // 拖曳相關變數
         let isDragging = false;
         let startX = 0;
         let startY = 0;
@@ -391,34 +390,14 @@
         const zoomIndicator = document.getElementById('zoomIndicator');
         const dragIndicator = document.getElementById('dragIndicator');
         
-        // 清除 Pseudocode 歷史記錄
         function clearPseudocodeHistory() {
             vscode.postMessage({ command: 'webview.clearPseudocodeHistory' });
-            const pseudocodeText = document.getElementById('pseudocode-text');
-            if (pseudocodeText) {
-                pseudocodeText.textContent = '等待生成 Pseudocode...';
+            const pseudocodeContent = document.getElementById('pseudocode-content');
+            if (pseudocodeContent) {
+                pseudocodeContent.innerHTML = '';
             }
         }
         
-        // 格式化 Pseudocode 顯示
-        function formatPseudocodeDisplay(text) {
-            // 處理分隔線
-            let formatted = text.replace(/─{50}/g, '<hr class="pseudocode-separator">');
-            
-            // 處理時間戳 (format: [HH:MM:SS])
-            formatted = formatted.replace(/\[(\d{1,2}:\d{2}:\d{2})\]/g, '<span class="pseudocode-timestamp">[$1]</span>');
-            
-            // 處理類型標識
-            formatted = formatted.replace(/(\s)(Function|Class|If Statement|For Loop|While Loop|Try Block|Single Line)(\s)/g, 
-                '$1<span class="pseudocode-type">$2</span>$3');
-            
-            // 處理快取標識
-            formatted = formatted.replace(/\[Cached\]/g, '<span class="pseudocode-cached">[Cached]</span>');
-            
-            return formatted;
-        }
-        
-        // 點擊節點事件
         mermaidContainer.addEventListener('click', (e) => {
             const el = e.target.closest('.node');
             if (!el) return;
@@ -433,7 +412,6 @@
             highlightNodes([nodeId]);
         });
         
-        // 拖曳功能實現
         mermaidContainer.addEventListener('mousedown', (e) => {
             if (e.target.closest('.node')) {
                 return;
@@ -498,7 +476,6 @@
             }
         });
         
-        // Ctrl + 滾輪縮放功能
         mermaidContainer.addEventListener('wheel', (e) => {
             if (e.ctrlKey || e.metaKey) {
                 e.preventDefault();
@@ -591,6 +568,56 @@
                 console.log('No nodes found to highlight');
             }
         }
+
+        function setLineMapping(mappingArray) {
+            lineMapping = {};
+            mappingArray.forEach(item => {
+                lineMapping[item.pythonLine] = item.pseudocodeLine;
+            });
+            console.log('Line mapping set:', lineMapping);
+        }
+
+        function highlightPseudocodeLines(pythonLineNumbers) {
+            clearPseudocodeHighlight();
+            
+            console.log('Highlighting pseudocode for Python lines:', pythonLineNumbers);
+            
+            pythonLineNumbers.forEach((pythonLine, index) => {
+                const pseudoLine = lineMapping[pythonLine];
+                
+                if (pseudoLine) {
+                    const element = document.getElementById('pseudo-line-' + pseudoLine);
+                    
+                    if (element) {
+                        element.classList.add('highlighted');
+                        currentHighlightedPseudocodeLines.push(element);
+                        console.log('Python line', pythonLine, 'mapped to Pseudocode line', pseudoLine);
+                        
+                        if (index === 0) {
+                            element.scrollIntoView({ 
+                                behavior: 'smooth', 
+                                block: 'center'
+                            });
+                        }
+                    }
+                } else {
+                    console.warn('No mapping found for Python line:', pythonLine);
+                }
+            });
+            
+            if (currentHighlightedPseudocodeLines.length === 0) {
+                console.log('No pseudocode lines found to highlight');
+            } else {
+                console.log('Successfully highlighted', currentHighlightedPseudocodeLines.length, '/', pythonLineNumbers.length, 'lines');
+            }
+        }
+
+        function clearPseudocodeHighlight() {
+            currentHighlightedPseudocodeLines.forEach(el => {
+                el.classList.remove('highlighted');
+            });
+            currentHighlightedPseudocodeLines = [];
+        }
         
         function clearHighlight() {
             currentHighlightedNodes.forEach(el => {
@@ -601,35 +628,69 @@
 
         function clearHighlightAndEditor() {
             clearHighlight();
+            clearPseudocodeHighlight();
             vscode.postMessage({ command: 'webview.requestClearEditor' });
         }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        function updatePseudocodeDisplay(pseudocode) {
+            const pseudocodeContent = document.getElementById('pseudocode-content');
+            if (!pseudocodeContent) return;
+
+            if (!pseudocode || pseudocode.trim() === '' || pseudocode.trim() === '等待生成 Pseudocode...') {
+                pseudocodeContent.innerHTML = '';
+                return;
+            }
+
+            const lines = pseudocode.split('\n');
+            let html = '';
+            
+            lines.forEach((line, index) => {
+                const lineNum = index + 1;
+                const lineId = 'pseudo-line-' + lineNum;
+                const displayContent = line.trim() === '' ? '&nbsp;' : escapeHtml(line);
+                
+                html += '<div class="pseudocode-line" id="' + lineId + '" data-line-number="' + lineNum + '">' +
+                        '<span class="line-number">' + lineNum + '</span>' +
+                        '<span class="line-content">' + displayContent + '</span>' +
+                        '</div>';
+            });
+            
+            pseudocodeContent.innerHTML = html;
+            console.log('Pseudocode display updated with', lines.length, 'lines');
+        }
         
-        // 監聽來自擴展的消息
         window.addEventListener('message', event => {
             const message = event.data;
+            console.log('Received message:', message.command);
+            
             switch (message.command) {
+                case 'highlightNodesAndPseudocode':
+                    console.log('Highlighting nodes and pseudocode:', message.nodeIds, message.pseudocodeLines);
+                    highlightNodes(message.nodeIds);
+                    highlightPseudocodeLines(message.pseudocodeLines);
+                    break;
                 case 'highlightNodes':
                     highlightNodes(message.nodeIds);
                     break;
                 case 'clearHighlight':
                     clearHighlight();
+                    clearPseudocodeHighlight();
                     break;
                 case 'setNodeOrder':
                     nodeOrder = message.nodeOrder;
                     console.log('Updated node order:', nodeOrder);
                     break;
                 case 'updatePseudocode':
-                    // 更新 pseudocode 顯示
-                    const pseudocodeText = document.getElementById('pseudocode-text');
-                    if (pseudocodeText) {
-                        // 使用 innerHTML 來支援 HTML 格式化
-                        pseudocodeText.innerHTML = formatPseudocodeDisplay(message.pseudocode);
-                        // 自動滾動到底部顯示最新內容
-                        const outputContent = document.getElementById('pseudocode-content');
-                        if (outputContent) {
-                            outputContent.scrollTop = outputContent.scrollHeight;
-                        }
-                    }
+                    updatePseudocodeDisplay(message.pseudocode);
+                    break;
+                case 'setLineMapping':
+                    setLineMapping(message.mapping);
                     break;
             }
         });
