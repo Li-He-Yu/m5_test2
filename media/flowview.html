@@ -209,6 +209,7 @@
             align-items: center;
             min-width: 3000px;
             min-height: 3000px;
+            padding: 1000px;
         }
         
         #mermaid-container.grabbing {
@@ -477,30 +478,41 @@
         });
         
         mermaidContainer.addEventListener('wheel', (e) => {
-            if (e.ctrlKey || e.metaKey) {
-                e.preventDefault();
+        if (e.ctrlKey || e.metaKey) {
+            e.preventDefault();
+            
+            const zoomSpeed = 0.1;
+            const delta = e.deltaY > 0 ? -zoomSpeed : zoomSpeed;
+            const newScale = Math.min(Math.max(0.1, currentScale + delta), 5);
+            
+            if (newScale !== currentScale) {
+                currentScale = newScale;
+                const mermaidEl = document.querySelector('.mermaid');
+                mermaidEl.style.transform = 'scale(' + currentScale + ')';
                 
-                const zoomSpeed = 0.1;
-                const delta = e.deltaY > 0 ? -zoomSpeed : zoomSpeed;
-                const newScale = Math.min(Math.max(0.1, currentScale + delta), 5);
-                
-                if (newScale !== currentScale) {
-                    currentScale = newScale;
-                    document.querySelector('.mermaid').style.transform = 'scale(' + currentScale + ')';
-                    
-                    zoomIndicator.textContent = Math.round(currentScale * 100) + '%';
-                    zoomIndicator.classList.add('visible');
-                    
-                    if (zoomTimeout) {
-                        clearTimeout(zoomTimeout);
-                    }
-                    
-                    zoomTimeout = setTimeout(() => {
-                        zoomIndicator.classList.remove('visible');
-                    }, 2000);
+                // 動態調整 wrapper 尺寸
+                const wrapper = document.getElementById('mermaid-wrapper');
+                const svg = mermaidEl.querySelector('svg');
+                if (svg) {
+                    const scaledWidth = svg.getBoundingClientRect().width * currentScale;
+                    const scaledHeight = svg.getBoundingClientRect().height * currentScale;
+                    wrapper.style.minWidth = Math.max(3000, scaledWidth + 2000) + 'px';
+                    wrapper.style.minHeight = Math.max(3000, scaledHeight + 2000) + 'px';
                 }
+                
+                zoomIndicator.textContent = Math.round(currentScale * 100) + '%';
+                zoomIndicator.classList.add('visible');
+                
+                if (zoomTimeout) {
+                    clearTimeout(zoomTimeout);
+                }
+                
+                zoomTimeout = setTimeout(() => {
+                    zoomIndicator.classList.remove('visible');
+                }, 2000);
             }
-        }, { passive: false });
+        }
+    }, { passive: false });
         
         document.addEventListener('wheel', (e) => {
             if (e.ctrlKey || e.metaKey) {
