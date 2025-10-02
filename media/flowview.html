@@ -86,7 +86,7 @@
             flex: 1;
             padding: 0;
             background-color: var(--vscode-editor-background);
-            border: 1px solid var(--vscode-panel-border);
+            border: none;
             border-radius: 4px;
             overflow-y: auto;
             min-height: 0;
@@ -290,18 +290,12 @@
 <body>
     <div class="output-section">
         <div class="output-header">
-            <h3>LLM Pseudocode</h3>
-            <button class="clear-btn" id="btnClearPseudocode">Clear History</button>
         </div>
         <div class="output-content" id="pseudocode-content">
         </div>
     </div>
 
     <div class="flowchart-section">
-        <div class="controls">
-            <button id="btnReset">Reset View</button>
-            <button id="btnClear">Clear Highlight</button>
-        </div>
         
         <div id="mermaid-container">
             <div class="zoom-indicator" id="zoomIndicator">100%</div>
@@ -314,9 +308,6 @@
 
     <script type="application/json" id="node-order-json" nonce="%%NONCE%%">%%NODE_ORDER_JSON%%</script>
     <script nonce="%%NONCE%%">
-        document.getElementById('btnReset').addEventListener('click', resetView);
-        document.getElementById('btnClear').addEventListener('click', clearHighlightAndEditor);
-        document.getElementById('btnClearPseudocode').addEventListener('click', clearPseudocodeHistory);
 
         const vscode = acquireVsCodeApi();
         let currentScale = 1;

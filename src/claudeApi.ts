@@ -22,23 +22,71 @@ function buildLineMapping(pythonCode: string, pseudocode: string): LineMapping[]
     const mapping: LineMapping[] = [];
     let pseudoIndex = 0;
     
+    let inMultiLineStatement = false;
+    let multiLineStartIndex = -1;
+    
     for (let pythonIndex = 0; pythonIndex < pythonLines.length; pythonIndex++) {
         const pythonLine = pythonLines[pythonIndex].trim();
+        const rawLine = pythonLines[pythonIndex];
         
+        // 跳過空行和註解
         if (pythonLine === '' || pythonLine.startsWith('#')) {
             continue;
         }
         
-        while (pseudoIndex < pseudoLines.length && pseudoLines[pseudoIndex].trim() === '') {
-            pseudoIndex++;
+        // 檢測多行語句的開始 (包含未閉合的括號、方括號或大括號)
+        const openBrackets = (pythonLine.match(/[\(\[\{]/g) || []).length;
+        const closeBrackets = (pythonLine.match(/[\)\]\}]/g) || []).length;
+        
+        if (!inMultiLineStatement && openBrackets > closeBrackets) {
+            inMultiLineStatement = true;
+            multiLineStartIndex = pythonIndex;
         }
         
-        if (pseudoIndex < pseudoLines.length) {
-            mapping.push({
-                pythonLine: pythonIndex + 1,
-                pseudocodeLine: pseudoIndex + 1
-            });
-            pseudoIndex++;
+        // 檢測多行語句的結束
+        if (inMultiLineStatement) {
+            const totalOpen = pythonLines.slice(multiLineStartIndex, pythonIndex + 1)
+                .join('').match(/[\(\[\{]/g)?.length || 0;
+            const totalClose = pythonLines.slice(multiLineStartIndex, pythonIndex + 1)
+                .join('').match(/[\)\]\}]/g)?.length || 0;
+            
+            if (totalOpen === totalClose) {
+                inMultiLineStatement = false;
+                // 跳過 pseudocode 空行
+                while (pseudoIndex < pseudoLines.length && pseudoLines[pseudoIndex].trim() === '') {
+                    pseudoIndex++;
+                }
+                
+                // 將多行語句的所有行都映射到同一個 pseudocode 行
+                if (pseudoIndex < pseudoLines.length) {
+                    for (let i = multiLineStartIndex; i <= pythonIndex; i++) {
+                        if (pythonLines[i].trim() !== '' && !pythonLines[i].trim().startsWith('#')) {
+                            mapping.push({
+                                pythonLine: i + 1,
+                                pseudocodeLine: pseudoIndex + 1
+                            });
+                        }
+                    }
+                    pseudoIndex++;
+                }
+                multiLineStartIndex = -1;
+            }
+            continue;
+        }
+        
+        // 處理單行語句
+        if (!inMultiLineStatement) {
+            while (pseudoIndex < pseudoLines.length && pseudoLines[pseudoIndex].trim() === '') {
+                pseudoIndex++;
+            }
+            
+            if (pseudoIndex < pseudoLines.length) {
+                mapping.push({
+                    pythonLine: pythonIndex + 1,
+                    pseudocodeLine: pseudoIndex + 1
+                });
+                pseudoIndex++;
+            }
         }
     }
     
