@@ -577,51 +577,56 @@ class FlowchartGenerator(ast.NodeVisitor):
                 self.branch_ends = old_branch_ends
     
     def visit_While(self, node):
-    """處理 while 迴圈（支援 break/continue）"""
-    if self.current_node is None and not self.branch_ends:
-        return  # 不可達程式碼
+        """處理 while 迴圈（支援 break/continue)"""
+        if self.current_node is None and not self.branch_ends:
+            return  # 不可達程式碼
+            
+        while_id = self.get_next_id()
         
-    while_id = self.get_next_id()
-    
-    condition = self.get_source_segment(node.test)
-    self.add_node(while_id, f'while {condition}', 'diamond', 'fill:#e3f2fd,stroke:#0d47a1,stroke-width:2px', node)
-    
-    if self.current_node:
-        self.add_edge(self.current_node, while_id)
-    
-    # 將迴圈節點加入堆疊
-    self.loop_stack.append(while_id)
-    
-    # 儲存當前狀態
-    old_branch_ends = self.branch_ends[:]
-    self.branch_ends = []
-    
-    # 設置進入迴圈體的起點
-    self.current_node = while_id
-    
-    # 處理迴圈體中的每個語句
-    for i, stmt in enumerate(node.body):
-        self.visit(stmt)
-        # 只對第一個語句的邊添加 'True' 標籤
-        if i == 0:
-            self.fix_last_edge_label(while_id, 'True')
-    
-    # 如果迴圈體正常結束,連接回迴圈開始
-    if self.current_node and self.current_node != while_id:
-        self.add_edge(self.current_node, while_id)
-    
-    # 從堆疊中移除迴圈節點
-    self.loop_stack.pop()
-    
-    # 設置 while 迴圈後的流程
-    if self.branch_ends:
-        self.current_node = None
-    else:
+        condition = self.get_source_segment(node.test)
+        self.add_node(while_id, f'while {condition}', 'diamond','fill:#e3f2fd,stroke:#0d47a1,stroke-width:2px', node)
+        
+        if self.current_node:
+            self.add_edge(self.current_node, while_id)
+        
+        # 將迴圈節點加入堆疊（用於 break/continue)
+        self.loop_stack.append(while_id)
+        
+        # 儲存當前狀態
+        old_branch_ends = self.branch_ends[:]
+        self.branch_ends = []
+        
         self.current_node = while_id
-    
-    # 恢復並合併 branch_ends
-    if not self.branch_ends:
-        self.branch_ends = old_branch_ends
+        
+        first_in_body = True
+        for stmt in node.body:
+            if first_in_body:
+                self.visit(stmt)
+                self.fix_last_edge_label(while_id, 'True')
+                first_in_body = False
+            else:
+                self.visit(stmt)
+        
+        # 如果迴圈體正常結束（沒有 break)連接回迴圈開始
+        if self.current_node and self.current_node != while_id:
+            self.add_edge(self.current_node, while_id)
+        
+        # 從堆疊中移除迴圈節點
+        self.loop_stack.pop()
+        
+        # 設置 while 迴圈後的流程
+        # 如果有 break這些節點會成為後續程式的起點
+        if self.branch_ends:
+            # break 節點會繼續執行後面的程式碼
+            # 不直接連接，而是將它們保留在 branch_ends 中
+            self.current_node = None
+        else:
+            # 沒有 break正常的 while False 出口
+            self.current_node = while_id
+        
+        # 恢復並合併 branch_ends(但保留 break 節點）
+        if not self.branch_ends:
+            self.branch_ends = old_branch_ends
     
     def visit_Return(self, node):
         """處理 return 語句"""
