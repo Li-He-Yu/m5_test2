@@ -34,7 +34,7 @@ function buildLineMapping(pythonCode: string, pseudocode: string): LineMapping[]
             continue;
         }
         
-        // 檢測多行語句的開始 (包含未閉合的括號、方括號或大括號)
+        
         const openBrackets = (pythonLine.match(/[\(\[\{]/g) || []).length;
         const closeBrackets = (pythonLine.match(/[\)\]\}]/g) || []).length;
         
