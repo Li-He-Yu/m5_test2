@@ -513,6 +513,9 @@
             }
         }, { passive: false });
         
+
+        // 因為mermaid生成的格式是"flowchart-node_10-123"
+        // 但我只要"node_10" 所以會需要做一些處理
         function findNodeElement(nodeId) {
             const elements = document.querySelectorAll('.node');
 
@@ -535,14 +538,14 @@
         }
         
         function highlightNodes(nodeIds) {
-            clearHighlight();
+            clearHighlight();                     //發光之前要先清除上一個發光的點
             
             console.log('Highlighting nodes:', nodeIds);
             
             nodeIds.forEach((nodeId, index) => {
-                const element = findNodeElement(nodeId);
+                const element = findNodeElement(nodeId);              // 找到節點元素
                 if (element) {
-                    element.classList.add('highlighted');
+                    element.classList.add('highlighted');     //加上 highlighted class
                     currentHighlightedNodes.push(element);
                     console.log('Highlighted element:', element.id);
                     
@@ -669,6 +672,13 @@
             pseudocodeContent.innerHTML = html;
             console.log('Pseudocode display updated with', lines.length, 'lines');
         }
+        
+
+        // message = {
+        //     command: 'highlightNodesAndPseudocode',
+        //     nodeIds: ['node_5', 'node_6'],      
+        //     pseudocodeLines: [2, 3]              
+        // }   
         
         window.addEventListener('message', event => {
             const message = event.data;

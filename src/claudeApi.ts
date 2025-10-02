@@ -104,7 +104,7 @@ export async function codeToPseudocode(code: string): Promise<PseudocodeResult> 
     }
 
     if (!code || code.trim() === '') {
-        throw new Error('輸入的程式碼為空');
+        throw new Error('沒有輸入');
     }
 
     const endpoint = 'https://api.anthropic.com/v1/messages';
