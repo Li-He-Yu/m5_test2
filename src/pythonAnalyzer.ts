@@ -359,6 +359,31 @@ class FlowchartGenerator(ast.NodeVisitor):
             self.add_edge(self.current_node, node_id)
         self.current_node = node_id
     
+
+    def visit_Raise(self, node):
+        """處理 raise 語句"""
+        if self.current_node is None and not self.branch_ends:
+            return  # 不可達程式碼
+            
+        node_id = self.get_next_id()
+        
+        if node.exc:
+            exc = self.get_source_segment(node.exc)
+            self.add_node(node_id, f'raise {exc}', 'rounded','fill:#ffebee,stroke:#b71c1c,stroke-width:2px', node)
+        else:
+            self.add_node(node_id, 'raise', 'rounded','fill:#ffebee,stroke:#b71c1c,stroke-width:2px', node)
+        
+        if self.current_node:
+            self.add_edge(self.current_node, node_id)
+        
+        # raise 會終止當前執行流程
+        self.current_node = None
+
+
+
+
+
+
     def visit_If(self, node):
         """處理 if 語句"""
         if self.current_node is None and not self.branch_ends:
@@ -403,7 +428,7 @@ class FlowchartGenerator(ast.NodeVisitor):
                 elif_branches = self.process_elif_chain(node.orelse[0], if_id)
                 self.branch_ends.extend(elif_branches)
             else:
-                # 處理 else
+                #處理 else
                 self.visit(node.orelse[0])
                 self.fix_last_edge_label(if_id, 'No')
                 
@@ -413,15 +438,30 @@ class FlowchartGenerator(ast.NodeVisitor):
                 if self.current_node and not self.ends_with_return_or_break(node.orelse):
                     self.branch_ends.append(self.current_node)
         else:
-            # 沒有 else 分支的情況
-            # 設置 current_node 為 if_id讓後續的語句能從 No 分支連接
-            self.current_node = if_id
-            self.pending_no_label = if_id
-            # 不要將 if_id 加入 branch_ends
-            return  # 直接返回，避免設置 current_node 為 None
+            # 檢查是否在循環內
+            if self.loop_stack:
+                #在循環內的話No分支應該回到循環開始
+                loop_node = self.loop_stack[-1]
+                self.add_edge(if_id, loop_node, 'No')
+                #Yes 分支的結束也要回到循環
+                #不設置 pending_no_label
+            else:
+                #不在循環內就跟原本一樣
+                self.current_node = if_id
+                self.pending_no_label = if_id
+                return  #直接返回避免設置 current_node 為 None
         
-        # 只有在有多個分支需要合併時才設置 current_node 為 None
-        if len(self.branch_ends) > 0:
+        #處理分支合併
+        #如果在循環內，所有分支都應該回到循環開始
+        if self.loop_stack:
+            loop_node = self.loop_stack[-1]
+            for end_node in self.branch_ends:
+                if end_node:
+                    self.add_edge(end_node, loop_node)
+            self.branch_ends = []
+            self.current_node = None  # 循環內的 if 結束後，current_node 設為 None
+        elif len(self.branch_ends) > 0:
+            # 不在循環內，需要合併多個分支
             self.current_node = None
     
     def process_elif_chain(self, elif_node, parent_id):
@@ -475,11 +515,11 @@ class FlowchartGenerator(ast.NodeVisitor):
         return isinstance(last_stmt, ast.Return)
     
     def ends_with_return_or_break(self, body):
-        """檢查代碼塊是否以 return 或 break 語句結束"""
+        """檢查代碼塊是否以 return、break 或 raise 語句結束"""
         if not body:
             return False
         last_stmt = body[-1]
-        return isinstance(last_stmt, (ast.Return, ast.Break))
+        return isinstance(last_stmt, (ast.Return, ast.Break, ast.Raise))
     
     def ends_with_continue(self, body):
         """檢查代碼塊是否以 continue 語句結束"""
@@ -614,19 +654,17 @@ class FlowchartGenerator(ast.NodeVisitor):
         # 從堆疊中移除迴圈節點
         self.loop_stack.pop()
         
-        # 設置 while 迴圈後的流程
-        # 如果有 break這些節點會成為後續程式的起點
+        # 這次從這裡開始改耶比
+        # while 條件為 False 時，從 while_id 繼續執行後面的代碼
         if self.branch_ends:
-            # break 節點會繼續執行後面的程式碼
-            # 不直接連接，而是將它們保留在 branch_ends 中
-            self.current_node = None
+            # 同時處理 break 出口和 False 出口
+            self.branch_ends.append(while_id)
+            self.pending_no_label = while_id  
+            self.current_node = None  # 多個分支合併
         else:
-            # 沒有 break正常的 while False 出口
+            # 沒有 break 只有 False 出口
             self.current_node = while_id
-        
-        # 恢復並合併 branch_ends(但保留 break 節點）
-        if not self.branch_ends:
-            self.branch_ends = old_branch_ends
+            self.pending_no_label = while_id  # 下一條邊標記為 "False"
     
     def visit_Return(self, node):
         """處理 return 語句"""
@@ -641,14 +679,26 @@ class FlowchartGenerator(ast.NodeVisitor):
         else:
             self.add_node(node_id, 'return', 'rounded','fill:#ffebee,stroke:#b71c1c,stroke-width:2px', node)
         
-        if self.current_node:
-            # 檢查是否需要添加 No 標籤
+        
+        if self.branch_ends and not self.current_node:
+            # 從多個分支連接
+            for end_node in self.branch_ends:
+                if end_node:
+                    if end_node == self.pending_no_label:
+                        self.add_edge(end_node, node_id, 'False')  # 改為 False
+                        self.pending_no_label = None
+                    else:
+                        self.add_edge(end_node, node_id)
+            self.branch_ends = []
+        elif self.current_node:
+            # 從單一節點連接
             if self.current_node == self.pending_no_label:
-                self.add_edge(self.current_node, node_id, 'No')
+                self.add_edge(self.current_node, node_id, 'False')  # 改為 False
                 self.pending_no_label = None
             else:
                 self.add_edge(self.current_node, node_id)
         
+        # 處理函數調用的虛線
         if node.value and isinstance(node.value, ast.Call):
             if isinstance(node.value.func, ast.Name):
                 func_name = node.value.func.id

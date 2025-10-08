@@ -24,16 +24,39 @@ function buildLineMapping(pythonCode: string, pseudocode: string): LineMapping[]
     
     let inMultiLineStatement = false;
     let multiLineStartIndex = -1;
+    let inDocstring = false;  
+    let docstringDelimiter = '';  //記錄 docstring（''' 或 """）
     
     for (let pythonIndex = 0; pythonIndex < pythonLines.length; pythonIndex++) {
         const pythonLine = pythonLines[pythonIndex].trim();
         const rawLine = pythonLines[pythonIndex];
         
-        // 跳過空行和註解
+        //檢測 docstring 的開始和結束
+        if (!inDocstring) {
+            // 檢查是否開始 docstring
+            if (pythonLine.startsWith('"""') || pythonLine.startsWith("'''")) {
+                inDocstring = true;
+                docstringDelimiter = pythonLine.startsWith('"""') ? '"""' : "'''";
+                
+                // 單行 docstring
+                const delimiterCount = (pythonLine.match(new RegExp(docstringDelimiter, 'g')) || []).length;
+                if (delimiterCount >= 2) {
+                    inDocstring = false;
+                }
+                continue;  // 跳過這一行
+            }
+        } else {
+            // 在 docstring 中，檢查是否結束
+            if (pythonLine.includes(docstringDelimiter)) {
+                inDocstring = false;
+            }
+            continue;  // 跳過 docstring 內的所有行
+        }
+        
+        // 跳過空行和單行註解
         if (pythonLine === '' || pythonLine.startsWith('#')) {
             continue;
         }
-        
         
         const openBrackets = (pythonLine.match(/[\(\[\{]/g) || []).length;
         const closeBrackets = (pythonLine.match(/[\)\]\}]/g) || []).length;
@@ -60,7 +83,8 @@ function buildLineMapping(pythonCode: string, pseudocode: string): LineMapping[]
                 // 將多行語句的所有行都映射到同一個 pseudocode 行
                 if (pseudoIndex < pseudoLines.length) {
                     for (let i = multiLineStartIndex; i <= pythonIndex; i++) {
-                        if (pythonLines[i].trim() !== '' && !pythonLines[i].trim().startsWith('#')) {
+                        const line = pythonLines[i].trim();
+                        if (line !== '' && !line.startsWith('#')) {
                             mapping.push({
                                 pythonLine: i + 1,
                                 pseudocodeLine: pseudoIndex + 1
@@ -91,6 +115,7 @@ function buildLineMapping(pythonCode: string, pseudocode: string): LineMapping[]
     }
     
     console.log('Line mapping created:', mapping.length, 'mappings');
+    console.log('Mapping details:', mapping);  
     return mapping;
 }
 
