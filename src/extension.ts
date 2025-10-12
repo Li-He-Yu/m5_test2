@@ -9,6 +9,7 @@ import * as dotenv from 'dotenv';
 import { parsePythonWithAST } from './pythonAnalyzer';
 import { WebViewNodeClickEventHandler, clearEditor } from './WebviewEventHandler';
 
+export let sourceDocUri: vscode.Uri | undefined;  // 產生流程圖時記錄來源檔案
 let currentPanel: vscode.WebviewPanel | undefined;
 let lineToNodeMap: Map<number, string[]> = new Map();
 let nodeOrder: string[] = [];
@@ -63,6 +64,7 @@ export function activate(context: vscode.ExtensionContext) {
         }
 
         const code = document.getText();
+        sourceDocUri = editor.document.uri;// 紀錄生成 flowchart 的時候，對應的 file 是誰
         
         try {
             const { mermaidCode, lineMapping, nodeSequence, nodeMeta } = await parsePythonWithAST(code);
@@ -124,7 +126,7 @@ export function activate(context: vscode.ExtensionContext) {
                             });
                             break;
                         case 'webview.nodeClicked':{
-                            WebViewNodeClickEventHandler(editor, message);
+                            WebViewNodeClickEventHandler(message);
                             break;
                         }
                         case 'webview.requestClearEditor':{
@@ -163,6 +165,10 @@ export function activate(context: vscode.ExtensionContext) {
 
         const editor = vscode.window.activeTextEditor;
         if (!editor || editor.document.languageId !== 'python') {
+            return;
+        }
+        if(editor.document.uri !== sourceDocUri){
+            console.error('current editor is not where the flowchart come from');
             return;
         }
 

@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { 
-	nodeIdToLine, nodeIdStringIsStartOrEnd
+	nodeIdToLine, nodeIdStringIsStartOrEnd, sourceDocUri
 } from './extension';
 
 // decoration type (top-level, cache it)
@@ -9,12 +9,17 @@ const highlightDecorationType = vscode.window.createTextEditorDecorationType({
   backgroundColor: new vscode.ThemeColor('editor.selectionBackground') // or a fixed rgba like 'rgba(255,235,59,0.25)'
 });
 
-export function WebViewNodeClickEventHandler(
-	editor: typeof vscode.window.activeTextEditor,
+export async function WebViewNodeClickEventHandler(
 	message: any
-	):void
+	):Promise<void>
 {
-	// console.log("recieve message: nodeClicked %s", message.nodeId);
+	const editor = await getSourceEditor();   
+	console.log("recieve message: nodeClicked %s", message.nodeId);
+	// console.log('active:', vscode.window.activeTextEditor?.document.uri.toString());
+	// console.log('param :', editor?.document.uri.toString());
+	// console.log('visible:', vscode.window.visibleTextEditors.map(e => e.document.uri.toString()));
+	// console.log('source:', sourceDocUri?.toString()); // 產生流程圖時記下的來源檔
+
 	// editor = vscode.window.activeTextEditor;
 	//  |___> declare in global
 	if (!editor) {
@@ -43,6 +48,34 @@ export function WebViewNodeClickEventHandler(
 	highlightEditor(editor, ranges);
 }
 
+// 取得 flowchart 對應的 editor
+// 如果在生成 floqchart 之後切換 TextEditor，會導致 activeTextEditor 變成 undefined 要重新抓
+async function getSourceEditor(): Promise<vscode.TextEditor | undefined> {
+    if (!sourceDocUri) {
+		console.error('找不到 flowchart 對應的 editor, 請打開正確頁面');
+		vscode.window.showWarningMessage('找不到 flowchart 對應的 editor, 請打開正確頁面');
+        return;
+    }
+
+    // 先找可見的, visible editor
+    const vis = vscode.window.visibleTextEditors.find(
+        (e) => e.document.uri.toString() === sourceDocUri!.toString()
+    );
+    if (vis) {
+		return vis;
+	}
+
+    // 不可見就打開它
+	// 在 extension 中，用 'sourceDocUri' 來儲存生成 flowchart 時對應的 source file 路徑
+	// 打開會造成一些 race condition，懶得修; 會跟切換頁面後 editor 自動指到第一行發送的 cursor at .. 衝突
+
+    // const doc = await vscode.workspace.openTextDocument(sourceDocUri);
+    // return vscode.window.showTextDocument(doc, {
+    //     preview: false,
+    //     viewColumn: vscode.ViewColumn.One,
+    // });
+}
+
 function highlightEditor(
 	editor: typeof vscode.window.activeTextEditor,
 	ranges: readonly vscode.Range[]
@@ -52,9 +85,14 @@ function highlightEditor(
 		return;
 	}
 
+	if(!ranges){ 
+		console.error('\'range\' was undefined when highlight editor');
+		return;
+	}
+
+	console.log('renges: ', ranges);
 	editor.setDecorations(highlightDecorationType, ranges);
 
-	if(!ranges){ return; }
 	// scroll to the first line
 	editor.revealRange(ranges[0], vscode.TextEditorRevealType.InCenterIfOutsideViewport);
 }
