@@ -7,9 +7,10 @@ import { codeToPseudocode, PseudocodeResult } from './claudeApi';
 import { PythonCodeBlockParser, CodeBlock, CodeBlockType } from './codeBlockParser';
 import * as dotenv from 'dotenv';
 import { parsePythonWithAST } from './pythonAnalyzer';
-import { WebViewNodeClickEventHandler, clearEditor } from './WebviewEventHandler';
+import { WebViewNodeClickEventHandler, clearEditor, setWebviewPanel, handlePseudocodeLineClick, setMappings } from './WebviewEventHandler';
 
-export let sourceDocUri: vscode.Uri | undefined;  // 產生流程圖時記錄來源檔案
+
+export let sourceDocUri: vscode.Uri | undefined;
 let currentPanel: vscode.WebviewPanel | undefined;
 let lineToNodeMap: Map<number, string[]> = new Map();
 let nodeOrder: string[] = [];
@@ -18,6 +19,7 @@ const pseudocodeCache = new Map<string, string>();
 let pseudocodeHistory: string[] = [];
 
 let currentLineMapping: Array<{pythonLine: number, pseudocodeLine: number}> = [];
+let pseudocodeToLineMap: Map<number, number> = new Map();
 let fullPseudocodeGenerated = false;
 
 export const nodeIdToLine = new Map<string, number | null>();
@@ -64,7 +66,7 @@ export function activate(context: vscode.ExtensionContext) {
         }
 
         const code = document.getText();
-        sourceDocUri = editor.document.uri;// 紀錄生成 flowchart 的時候，對應的 file 是誰
+        sourceDocUri = editor.document.uri;
         
         try {
             const { mermaidCode, lineMapping, nodeSequence, nodeMeta } = await parsePythonWithAST(code);
@@ -100,11 +102,16 @@ export function activate(context: vscode.ExtensionContext) {
 
                 currentPanel.onDidDispose(() => {
                     currentPanel = undefined;
+                    setWebviewPanel(undefined);
                     pseudocodeHistory = [];
                     currentLineMapping = [];
+                    pseudocodeToLineMap.clear();
                     fullPseudocodeGenerated = false;
                 });
             }
+
+            // 設置 webview panel 引用
+            setWebviewPanel(currentPanel);
 
             currentPanel.webview.html = await getWebviewHtmlExternal(
                 currentPanel.webview,
@@ -125,19 +132,21 @@ export function activate(context: vscode.ExtensionContext) {
                                 nodeOrder: nodeOrder
                             });
                             break;
-                        case 'webview.nodeClicked':{
+                        case 'webview.nodeClicked':
                             WebViewNodeClickEventHandler(message);
                             break;
-                        }
-                        case 'webview.requestClearEditor':{
+                        case 'webview.requestClearEditor':
                             clearEditor(editor);
                             break;
-                        }
                         case 'webview.clearPseudocodeHistory':
                             pseudocodeHistory = [];
                             currentLineMapping = [];
+                            pseudocodeToLineMap.clear();
                             fullPseudocodeGenerated = false;
                             updateWebviewPseudocode();
+                            break;
+                        case 'webview.pseudocodeLineClicked':
+                            handlePseudocodeLineClick(message.pseudocodeLine);
                             break;
                     }
                 },
@@ -153,6 +162,7 @@ export function activate(context: vscode.ExtensionContext) {
     const clearHistoryDisposable = vscode.commands.registerCommand('code2pseudocode.clearHistory', () => {
         pseudocodeHistory = [];
         currentLineMapping = [];
+        pseudocodeToLineMap.clear();
         fullPseudocodeGenerated = false;
         updateWebviewPseudocode();
         vscode.window.showInformationMessage('Pseudocode history cleared');
@@ -167,7 +177,7 @@ export function activate(context: vscode.ExtensionContext) {
         if (!editor || editor.document.languageId !== 'python') {
             return;
         }
-        if(editor.document.uri !== sourceDocUri){
+        if (editor.document.uri !== sourceDocUri) {
             console.error('current editor is not where the flowchart come from');
             return;
         }
@@ -264,8 +274,13 @@ function updateWebviewPseudocode() {
     }
 }
 
-export function nodeIdStringIsStartOrEnd(nodeId: string): Boolean{
-	return nodeId === "Start" || nodeId === "End";
+// ❌ 刪除這個函數定義（第 275-295 行）
+// function handlePseudocodeLineClick(pseudocodeLine: number, editor: vscode.TextEditor) {
+//     ...
+// }
+
+export function nodeIdStringIsStartOrEnd(nodeId: string): Boolean {
+    return nodeId === "Start" || nodeId === "End";
 }
 
 function parseLineMapping(mappingStr: string): Map<number, string[]> {
@@ -281,7 +296,7 @@ function parseLineMapping(mappingStr: string): Map<number, string[]> {
             console.log(`Line ${lineNum} maps to nodes:`, nodes);
 
             const arr = nodes as string[];
-            let tempNodeId : string = arr[0];
+            let tempNodeId: string = arr[0];
             nodeIdToLine.set(tempNodeId, lineNum);
         }
     } catch (e) {
@@ -292,7 +307,7 @@ function parseLineMapping(mappingStr: string): Map<number, string[]> {
 }
 
 async function parseNodeSequence(sequenceStr: string, nodeMeta: string, fullCode: string): Promise<string[]> {
-    let sequence : string[] = [];
+    let sequence: string[] = [];
     try {
         sequence = JSON.parse(sequenceStr);
     } catch (e) {
@@ -300,23 +315,6 @@ async function parseNodeSequence(sequenceStr: string, nodeMeta: string, fullCode
         return ['Error parsing node sequence'];
     }
     return sequence;
-
-    const nodeMetaObj = parseNodeMeta(nodeMeta);
-
-    for (const [id, m] of Object.entries(nodeMetaObj)) {
-        nodeIdToLine.set(id, m.line ?? null);
-        nodeIdToLabel.set(id, m.label);
-    }
-
-    const orderedForLLM = sequence.map((tmpNodeId) => ({
-        nodeId: tmpNodeId,
-        line: nodeIdToLine.get(tmpNodeId) ?? null,
-        statement: nodeIdToLabel.get(tmpNodeId) ?? (nodeIdStringIsStartOrEnd(tmpNodeId) ? tmpNodeId : '')
-    }));
-
-    let sortResult: string[] = sequence;
-    
-    return sortResult;
 }
 
 type NodeMeta = Record<string, { 
@@ -326,15 +324,17 @@ type NodeMeta = Record<string, {
 }>;
 
 function parseNodeMeta(metaStr: string): NodeMeta {
-  try { return JSON.parse(metaStr) as NodeMeta; }
-  catch (e) { console.error('Error parsing node meta:', e); return {}; }
+    try { return JSON.parse(metaStr) as NodeMeta; }
+    catch (e) { console.error('Error parsing node meta:', e); return {}; }
 }
 
 function getNonce(): string {
-  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-  let nonce = '';
-  for (let i = 0; i < 32; i++) {nonce += chars.charAt(Math.floor(Math.random() * chars.length));}
-  return nonce;
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+    let nonce = '';
+    for (let i = 0; i < 32; i++) {
+        nonce += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+    return nonce;
 }
 
 async function getWebviewHtmlExternal(
@@ -416,6 +416,15 @@ async function convertToPseudocode(isAutoUpdate: boolean = false) {
             console.log('Pseudocode lines:', result.pseudocode.split('\n').length);
             
             currentLineMapping = result.lineMapping;
+
+            pseudocodeToLineMap.clear();
+            result.lineMapping.forEach(mapping => {
+                pseudocodeToLineMap.set(mapping.pseudocodeLine, mapping.pythonLine);
+            });
+            console.log('Pseudocode to line map created:', Array.from(pseudocodeToLineMap.entries()));
+            
+            // 設置映射到 WebviewEventHandler
+            setMappings(pseudocodeToLineMap, lineToNodeMap);
             
             pseudocodeHistory = [];
             addToPseudocodeHistory(result.pseudocode);

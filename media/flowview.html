@@ -646,6 +646,7 @@
             return div.innerHTML;
         }
 
+        // 在 updatePseudocodeDisplay 函數中修改
         function updatePseudocodeDisplay(pseudocode) {
             const pseudocodeContent = document.getElementById('pseudocode-content');
             if (!pseudocodeContent) return;
@@ -663,16 +664,31 @@
                 const lineId = 'pseudo-line-' + lineNum;
                 const displayContent = line.trim() === '' ? '&nbsp;' : escapeHtml(line);
                 
-                html += '<div class="pseudocode-line" id="' + lineId + '" data-line-number="' + lineNum + '">' +
+                html += '<div class="pseudocode-line" id="' + lineId + '" data-line-number="' + lineNum + '" style="cursor: pointer;">' +
                         '<span class="line-number">' + lineNum + '</span>' +
                         '<span class="line-content">' + displayContent + '</span>' +
                         '</div>';
             });
             
             pseudocodeContent.innerHTML = html;
+            
+            // 添加點擊事件監聽
+            const pseudoLines = pseudocodeContent.querySelectorAll('.pseudocode-line');
+            pseudoLines.forEach(lineEl => {
+                lineEl.addEventListener('click', function() {
+                    const pseudoLineNum = parseInt(this.getAttribute('data-line-number'));
+                    console.log('Pseudocode line clicked:', pseudoLineNum);
+                    
+                    // 發送消息到 extension
+                    vscode.postMessage({ 
+                        command: 'webview.pseudocodeLineClicked', 
+                        pseudocodeLine: pseudoLineNum 
+                    });
+                });
+            });
+            
             console.log('Pseudocode display updated with', lines.length, 'lines');
         }
-        
 
         // message = {
         //     command: 'highlightNodesAndPseudocode',

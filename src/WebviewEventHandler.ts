@@ -9,47 +9,132 @@ const highlightDecorationType = vscode.window.createTextEditorDecorationType({
   backgroundColor: new vscode.ThemeColor('editor.selectionBackground') // or a fixed rgba like 'rgba(255,235,59,0.25)'
 });
 
+// 用來存儲當前的 webview panel 引用
+let currentWebviewPanel: vscode.WebviewPanel | undefined;
+
+// 存儲映射關係
+let pseudocodeToLineMapRef: Map<number, number> | undefined;
+let lineToNodeMapRef: Map<number, string[]> | undefined;
+
+export function setWebviewPanel(panel: vscode.WebviewPanel | undefined) {
+	currentWebviewPanel = panel;
+}
+
+export function setMappings(
+	pseudocodeToLineMap: Map<number, number>,
+	lineToNodeMap: Map<number, string[]>
+) {
+	pseudocodeToLineMapRef = pseudocodeToLineMap;
+	lineToNodeMapRef = lineToNodeMap;
+}
+
 export async function WebViewNodeClickEventHandler(
 	message: any
-	):Promise<void>
-{
+): Promise<void> {
 	const editor = await getSourceEditor();   
-	console.log("recieve message: nodeClicked %s", message.nodeId);
-	// console.log('active:', vscode.window.activeTextEditor?.document.uri.toString());
-	// console.log('param :', editor?.document.uri.toString());
-	// console.log('visible:', vscode.window.visibleTextEditors.map(e => e.document.uri.toString()));
-	// console.log('source:', sourceDocUri?.toString()); // 產生流程圖時記下的來源檔
+	console.log("receive message: nodeClicked %s", message.nodeId);
 
-	// editor = vscode.window.activeTextEditor;
-	//  |___> declare in global
 	if (!editor) {
 		console.error("could not find vscode.window.activeTextEditor");
 		return;
 	}
 	
 	// special case
-	if(nodeIdStringIsStartOrEnd(message.nodeId)){
+	if (nodeIdStringIsStartOrEnd(message.nodeId)) {
 		console.log("%s has no related line num", message.nodeId);
+		clearEditor(editor);
+		// 清除 webview 中的高亮
+		if (currentWebviewPanel) {
+			currentWebviewPanel.webview.postMessage({
+				command: 'clearHighlight'
+			});
+		}
 		return;
 	}
 
 	// normal case
-	// const lines = nodeIdToLine.get(message.nodeId) ?? [];
-	// if (lines.length === 0) return;
-	const line = nodeIdToLine.get(message.nodeId) ?? '';
-	if(!line){
+	const line = nodeIdToLine.get(message.nodeId) ?? null;
+	if (!line) {
 		console.error("can not find related line in mapping: %s", message.nodeId);
+		clearEditor(editor);
+		// 清除 webview 中的高亮
+		if (currentWebviewPanel) {
+			currentWebviewPanel.webview.postMessage({
+				command: 'clearHighlight'
+			});
+		}
 		return;
 	}
 
-	let lines : number[] = [line];// <<<<<<<<<<  temp using single line version
+	console.log(`Node ${message.nodeId} corresponds to line ${line}`);
+	
+	// 高亮 Python 編輯器中的對應行
+	const lines: number[] = [line];
 	const ranges = lines.map(ln => new vscode.Range(ln - 1, 0, ln - 1, Number.MAX_SAFE_INTEGER));
 
 	highlightEditor(editor, ranges);
+	
+	// 發送消息到 webview 高亮對應的 pseudocode 行
+	if (currentWebviewPanel) {
+		currentWebviewPanel.webview.postMessage({
+			command: 'highlightNodesAndPseudocode',
+			nodeIds: [message.nodeId],
+			pseudocodeLines: [line]
+		});
+	}
+}
+
+export async function handlePseudocodeLineClick(
+	pseudocodeLine: number
+): Promise<void> {
+	const editor = await getSourceEditor();
+	
+	console.log('Pseudocode line clicked:', pseudocodeLine);
+	
+	if (!editor) {
+		console.error("could not find source editor");
+		return;
+	}
+	
+	// 從映射中找到對應的 Python 行
+	const pythonLine = pseudocodeToLineMapRef?.get(pseudocodeLine);
+	
+	if (!pythonLine) {
+		console.log('No Python line mapping found for pseudocode line:', pseudocodeLine);
+		clearEditor(editor);
+		// 清除 webview 中的高亮
+		if (currentWebviewPanel) {
+			currentWebviewPanel.webview.postMessage({
+				command: 'clearHighlight'
+			});
+		}
+		return;
+	}
+	
+	console.log('Mapped to Python line:', pythonLine);
+	
+	// 找到對應的 nodes
+	const nodeIds = lineToNodeMapRef?.get(pythonLine);
+	console.log('Mapped to nodes:', nodeIds);
+	
+	// 高亮 Python 編輯器中的對應行
+	const lineIndex = pythonLine - 1;
+	const range = new vscode.Range(lineIndex, 0, lineIndex, Number.MAX_SAFE_INTEGER);
+	
+	highlightEditor(editor, [range]);
+	
+	// 發送消息到 webview 高亮對應的 flowchart 節點和 pseudocode
+	if (currentWebviewPanel) {
+		currentWebviewPanel.webview.postMessage({
+			command: 'highlightNodesAndPseudocode',
+			nodeIds: nodeIds || [],
+			pseudocodeLines: [pythonLine]
+		});
+	}
 }
 
 // 取得 flowchart 對應的 editor
-// 如果在生成 floqchart 之後切換 TextEditor，會導致 activeTextEditor 變成 undefined 要重新抓
+// 如果在生成 flowchart 之後切換 TextEditor，會導致 activeTextEditor 變成 undefined 要重新抓
 async function getSourceEditor(): Promise<vscode.TextEditor | undefined> {
     if (!sourceDocUri) {
 		console.error('找不到 flowchart 對應的 editor, 請打開正確頁面');
@@ -57,7 +142,7 @@ async function getSourceEditor(): Promise<vscode.TextEditor | undefined> {
         return;
     }
 
-    // 先找可見的, visible editor
+    // 先找可見的 visible editor
     const vis = vscode.window.visibleTextEditors.find(
         (e) => e.document.uri.toString() === sourceDocUri!.toString()
     );
@@ -79,24 +164,26 @@ async function getSourceEditor(): Promise<vscode.TextEditor | undefined> {
 function highlightEditor(
 	editor: typeof vscode.window.activeTextEditor,
 	ranges: readonly vscode.Range[]
-):void{
-	if(!editor){
+): void {
+	if (!editor) {
 		console.error('vscode.window.activeTextEditor was undefined when highlight editor');
 		return;
 	}
 
-	if(!ranges){ 
+	if (!ranges) { 
 		console.error('\'range\' was undefined when highlight editor');
 		return;
 	}
 
-	console.log('renges: ', ranges);
+	console.log('ranges: ', ranges);
 	editor.setDecorations(highlightDecorationType, ranges);
 
 	// scroll to the first line
-	editor.revealRange(ranges[0], vscode.TextEditorRevealType.InCenterIfOutsideViewport);
+	if (ranges.length > 0) {
+		editor.revealRange(ranges[0], vscode.TextEditorRevealType.InCenterIfOutsideViewport);
+	}
 }
 
-export function clearEditor(editor: typeof vscode.window.activeTextEditor):void{
+export function clearEditor(editor: typeof vscode.window.activeTextEditor): void {
 	highlightEditor(editor, []);
 }
