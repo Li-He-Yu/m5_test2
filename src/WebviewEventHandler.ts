@@ -28,18 +28,28 @@ export function setMappings(
 	lineToNodeMapRef = lineToNodeMap;
 }
 
-export async function WebViewNodeClickEventHandler(
+
+
+// event trigger when:
+// 		some node is clicked in webview(flowchart area)
+// event do:
+// 		1. highlight correspond line in TextEditor of orignal code
+// 		2. highlight correspond line in pseudo code
+export async function FlowchartNodeClickEventHandler(
 	message: any
 ): Promise<void> {
 	const editor = await getSourceEditor();   
 	console.log("receive message: nodeClicked %s", message.nodeId);
 
+	// check editor work
 	if (!editor) {
 		console.error("could not find vscode.window.activeTextEditor");
 		return;
 	}
 	
 	// special case
+	// check not special case;
+	// o.w. exit and clear highlight
 	if (nodeIdStringIsStartOrEnd(message.nodeId)) {
 		console.log("%s has no related line num", message.nodeId);
 		clearEditor(editor);
@@ -53,6 +63,8 @@ export async function WebViewNodeClickEventHandler(
 	}
 
 	// normal case
+	// check the target line exist;
+	// o.w. exit and clear highlight
 	const line = nodeIdToLine.get(message.nodeId) ?? null;
 	if (!line) {
 		console.error("can not find related line in mapping: %s", message.nodeId);
@@ -68,12 +80,14 @@ export async function WebViewNodeClickEventHandler(
 
 	console.log(`Node ${message.nodeId} corresponds to line ${line}`);
 	
+	// this event do for TextEditor Area
 	// 高亮 Python 編輯器中的對應行
 	const lines: number[] = [line];
 	const ranges = lines.map(ln => new vscode.Range(ln - 1, 0, ln - 1, Number.MAX_SAFE_INTEGER));
 
 	highlightEditor(editor, ranges);
 	
+	// this event do for Pseudocode Area
 	// 發送消息到 webview 高亮對應的 pseudocode 行
 	if (currentWebviewPanel) {
 		currentWebviewPanel.webview.postMessage({
@@ -84,6 +98,14 @@ export async function WebViewNodeClickEventHandler(
 	}
 }
 
+
+
+// event trigger when:
+// 		some line of Pseudocode Area was clicked
+// event do: 
+// 		1. highlight correspond line in TextEditor of orignal code
+// 		2. highlight correspond line in pseudo code                   >>>>>>>>>>>>> 不需要對應關係( highlight 本身 )，可以在前端原地完成；
+// 		3. highlight correspond node in flowchart
 export async function handlePseudocodeLineClick(
 	pseudocodeLine: number
 ): Promise<void> {
@@ -96,6 +118,9 @@ export async function handlePseudocodeLineClick(
 		return;
 	}
 	
+	
+	
+	// this event do for TextEditor Area
 	// 從映射中找到對應的 Python 行
 	const pythonLine = pseudocodeToLineMapRef?.get(pseudocodeLine);
 	
@@ -113,15 +138,18 @@ export async function handlePseudocodeLineClick(
 	
 	console.log('Mapped to Python line:', pythonLine);
 	
-	// 找到對應的 nodes
-	const nodeIds = lineToNodeMapRef?.get(pythonLine);
-	console.log('Mapped to nodes:', nodeIds);
-	
 	// 高亮 Python 編輯器中的對應行
 	const lineIndex = pythonLine - 1;
 	const range = new vscode.Range(lineIndex, 0, lineIndex, Number.MAX_SAFE_INTEGER);
 	
 	highlightEditor(editor, [range]);
+	
+
+
+	// this event do for flowchart Area and Pseudocode Area
+	// 找到對應的 nodes
+	const nodeIds = lineToNodeMapRef?.get(pythonLine);
+	console.log('Mapped to nodes:', nodeIds);
 	
 	// 發送消息到 webview 高亮對應的 flowchart 節點和 pseudocode
 	if (currentWebviewPanel) {
@@ -132,6 +160,8 @@ export async function handlePseudocodeLineClick(
 		});
 	}
 }
+
+
 
 // 取得 flowchart 對應的 editor
 // 如果在生成 flowchart 之後切換 TextEditor，會導致 activeTextEditor 變成 undefined 要重新抓

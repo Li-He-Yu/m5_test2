@@ -3,7 +3,7 @@ import * as path from 'path';
 import { codeToPseudocode, PseudocodeResult } from './claudeApi';
 import * as dotenv from 'dotenv';
 import { parsePythonWithAST } from './pythonAnalyzer';
-import { WebViewNodeClickEventHandler, clearEditor, setWebviewPanel, handlePseudocodeLineClick, setMappings } from './WebviewEventHandler';
+import { FlowchartNodeClickEventHandler, clearEditor, setWebviewPanel, handlePseudocodeLineClick, setMappings } from './WebviewEventHandler';
 
 
 export let sourceDocUri: vscode.Uri | undefined;
@@ -23,7 +23,6 @@ let lineToNodeMap: Map<number, string[]> = new Map();
 let currentLineMapping: Array<{pythonLine: number, pseudocodeLine: number}> = [];
 let pseudocodeToLineMap: Map<number, number> = new Map();
 let fullPseudocodeGenerated = false;
-
 export const nodeIdToLine = new Map<string, number | null>();
 
 export function activate(context: vscode.ExtensionContext) {
@@ -125,16 +124,16 @@ export function activate(context: vscode.ExtensionContext) {
             currentPanel.webview.onDidReceiveMessage(
                 message => {
                     switch (message.command) {
-                        case 'nodeClicked':
-                            break;
-                        case 'requestNodeOrder':
-                            currentPanel?.webview.postMessage({
-                                command: 'setNodeOrder',
-                                nodeOrder: nodeOrder
-                            });
-                            break;
-                        case 'webview.nodeClicked':
-                            WebViewNodeClickEventHandler(message);
+                        // case 'nodeClicked':
+                        //     break;
+                        // case 'requestNodeOrder':
+                        //     currentPanel?.webview.postMessage({
+                        //         command: 'setNodeOrder',
+                        //         nodeOrder: nodeOrder
+                        //     });
+                        //     break;
+                        case 'webview.FlowchartNodeClicked':
+                            FlowchartNodeClickEventHandler(message);
                             break;
                         case 'webview.requestClearEditor':
                             clearEditor(editor);
