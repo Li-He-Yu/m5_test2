@@ -3,11 +3,11 @@ import * as path from 'path';
 import { codeToPseudocode, PseudocodeResult } from './claudeApi';
 import * as dotenv from 'dotenv';
 import { parsePythonWithAST } from './pythonAnalyzer';
-import { FlowchartNodeClickEventHandler, clearEditor, setWebviewPanel, handlePseudocodeLineClick, setMappings } from './WebviewEventHandler';
+import { FlowchartNodeClickEventHandler, clearEditor, handlePseudocodeLineClick } from './WebviewEventHandler';
 
 
 export let sourceDocUri: vscode.Uri | undefined;
-let currentPanel: vscode.WebviewPanel | undefined;
+export let currentPanel: vscode.WebviewPanel | undefined;
 let nodeOrder: string[] = [];
 
 const pseudocodeCache = new Map<string, string>();
@@ -19,9 +19,9 @@ let pseudocodeHistory: string[] = [];
 //    currentLineMapping  : ?
 //    pseudocodeToLineMap : map 'lineno-of-pseudocode : number' to 'lineno-of-code : number'
 //    nodeIdToLine        : map 'nodeId-of-flowchart-element : string' to 'lineno-of-code : number'
-let lineToNodeMap: Map<number, string[]> = new Map();
+export let lineToNodeMap: Map<number, string[]> = new Map();
 let currentLineMapping: Array<{pythonLine: number, pseudocodeLine: number}> = [];
-let pseudocodeToLineMap: Map<number, number> = new Map();
+export let pseudocodeToLineMap: Map<number, number> = new Map();
 let fullPseudocodeGenerated = false;
 export const nodeIdToLine = new Map<string, number | null>();
 
@@ -102,7 +102,7 @@ export function activate(context: vscode.ExtensionContext) {
 
                 currentPanel.onDidDispose(() => {
                     currentPanel = undefined;
-                    setWebviewPanel(undefined);
+                    // setWebviewPanel(undefined);
                     pseudocodeHistory = [];
                     currentLineMapping = [];
                     pseudocodeToLineMap.clear();
@@ -111,7 +111,7 @@ export function activate(context: vscode.ExtensionContext) {
             }
 
             // 設置 webview panel 引用
-            setWebviewPanel(currentPanel);
+            // setWebviewPanel(currentPanel);
 
             currentPanel.webview.html = await getWebviewHtmlExternal(
                 currentPanel.webview,
@@ -124,14 +124,6 @@ export function activate(context: vscode.ExtensionContext) {
             currentPanel.webview.onDidReceiveMessage(
                 message => {
                     switch (message.command) {
-                        // case 'nodeClicked':
-                        //     break;
-                        // case 'requestNodeOrder':
-                        //     currentPanel?.webview.postMessage({
-                        //         command: 'setNodeOrder',
-                        //         nodeOrder: nodeOrder
-                        //     });
-                        //     break;
                         case 'webview.FlowchartNodeClicked':
                             FlowchartNodeClickEventHandler(message);
                             break;
@@ -274,10 +266,7 @@ function updateWebviewPseudocode() {
     }
 }
 
-// ❌ 刪除這個函數定義（第 275-295 行）
-// function handlePseudocodeLineClick(pseudocodeLine: number, editor: vscode.TextEditor) {
-//     ...
-// }
+
 
 export function nodeIdStringIsStartOrEnd(nodeId: string): Boolean {
     return nodeId === "Start" || nodeId === "End";
@@ -424,7 +413,7 @@ async function convertToPseudocode(isAutoUpdate: boolean = false) {
             console.log('Pseudocode to line map created:', Array.from(pseudocodeToLineMap.entries()));
             
             // 設置映射到 WebviewEventHandler
-            setMappings(pseudocodeToLineMap, lineToNodeMap);
+            // setMappings(pseudocodeToLineMap, lineToNodeMap);
             
             pseudocodeHistory = [];
             addToPseudocodeHistory(result.pseudocode);
