@@ -1,10 +1,6 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
-import * as fs from 'fs';
-import * as os from 'os';
-import { spawn } from 'child_process';
 import { codeToPseudocode, PseudocodeResult } from './claudeApi';
-import { PythonCodeBlockParser, CodeBlock, CodeBlockType } from './codeBlockParser';
 import * as dotenv from 'dotenv';
 import { parsePythonWithAST } from './pythonAnalyzer';
 import { WebViewNodeClickEventHandler, clearEditor, setWebviewPanel, handlePseudocodeLineClick, setMappings } from './WebviewEventHandler';
@@ -12,12 +8,13 @@ import { WebViewNodeClickEventHandler, clearEditor, setWebviewPanel, handlePseud
 
 export let sourceDocUri: vscode.Uri | undefined;
 let currentPanel: vscode.WebviewPanel | undefined;
-let lineToNodeMap: Map<number, string[]> = new Map();
 let nodeOrder: string[] = [];
 
 const pseudocodeCache = new Map<string, string>();
 let pseudocodeHistory: string[] = [];
 
+// mapping relation
+let lineToNodeMap: Map<number, string[]> = new Map();
 let currentLineMapping: Array<{pythonLine: number, pseudocodeLine: number}> = [];
 let pseudocodeToLineMap: Map<number, number> = new Map();
 let fullPseudocodeGenerated = false;
