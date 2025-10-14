@@ -1088,6 +1088,7 @@ class FlowchartGenerator(ast.NodeVisitor):
         else:
             return str(type(node).__name__)
     
+            
     def get_op_symbol(self, op):
         """獲取運算符號"""
         op_map = {
