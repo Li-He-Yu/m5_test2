@@ -398,8 +398,11 @@ class FlowchartGenerator(ast.NodeVisitor):
         if self.branch_ends and not self.current_node:
             for end_node in self.branch_ends:
                 if end_node:
-                    self.add_edge(end_node, if_id)
-            self.branch_ends = []
+                    if end_node == self.pending_no_label:
+                        self.add_edge(end_node, if_id, 'No')
+                        self.pending_no_label = None
+                    else:
+                        self.add_edge(end_node, if_id)
         elif self.current_node:
             self.add_edge(self.current_node, if_id)
         
@@ -408,6 +411,7 @@ class FlowchartGenerator(ast.NodeVisitor):
         self.current_node = if_id
         
         # 處理 if body (Yes 分支)
+        if_branch_end = None
         if node.body:
             self.visit(node.body[0])
             self.fix_last_edge_label(if_id, 'Yes')
@@ -417,18 +421,21 @@ class FlowchartGenerator(ast.NodeVisitor):
             
             # 如果 if body 沒有以 return/break 結束，保存當前節點
             if self.current_node and not self.ends_with_return_or_break(node.body):
-                self.branch_ends.append(self.current_node)
+                if_branch_end = self.current_node
         
         # 處理 else/elif
+        else_branch_end = None
         if node.orelse:
             self.current_node = if_id
             
             if len(node.orelse) == 1 and isinstance(node.orelse[0], ast.If):
                 # 處理 elif
                 elif_branches = self.process_elif_chain(node.orelse[0], if_id)
-                self.branch_ends.extend(elif_branches)
+                # elif 鏈可能返回多個分支結束點
+                if elif_branches:
+                    self.branch_ends.extend(elif_branches)
             else:
-                #處理 else
+                # 處理 else
                 self.visit(node.orelse[0])
                 self.fix_last_edge_label(if_id, 'No')
                 
@@ -436,33 +443,34 @@ class FlowchartGenerator(ast.NodeVisitor):
                     self.visit(stmt)
                 
                 if self.current_node and not self.ends_with_return_or_break(node.orelse):
-                    self.branch_ends.append(self.current_node)
+                    else_branch_end = self.current_node
         else:
-            # 檢查是否在循環內
-            if self.loop_stack:
-                #在循環內的話No分支應該回到循環開始
-                loop_node = self.loop_stack[-1]
-                self.add_edge(if_id, loop_node, 'No')
-                #Yes 分支的結束也要回到循環
-                #不設置 pending_no_label
-            else:
-                #不在循環內就跟原本一樣
-                self.current_node = if_id
-                self.pending_no_label = if_id
-                return  #直接返回避免設置 current_node 為 None
+            # 沒有 else 分支
+            # 在循環內時，No 分支應該繼續執行後續語句，而不是回到循環開始
+            else_branch_end = if_id
+            self.pending_no_label = if_id
         
-        #處理分支合併
-        #如果在循環內，所有分支都應該回到循環開始
-        if self.loop_stack:
-            loop_node = self.loop_stack[-1]
-            for end_node in self.branch_ends:
-                if end_node:
-                    self.add_edge(end_node, loop_node)
-            self.branch_ends = []
-            self.current_node = None  # 循環內的 if 結束後，current_node 設為 None
-        elif len(self.branch_ends) > 0:
-            # 不在循環內，需要合併多個分支
+        # 收集所有分支結束點
+        collected_ends = []
+        if if_branch_end:
+            collected_ends.append(if_branch_end)
+        if else_branch_end:
+            collected_ends.append(else_branch_end)
+        collected_ends.extend(self.branch_ends)
+        
+        # 處理分支合併
+        if len(collected_ends) > 1:
+            # 有多個分支結束點，需要合併
+            self.branch_ends = collected_ends
             self.current_node = None
+        elif len(collected_ends) == 1:
+            # 只有一個分支結束點
+            self.current_node = collected_ends[0]
+            self.branch_ends = []
+        else:
+            # 沒有分支結束點（所有分支都以 return/break 結束）
+            self.current_node = None
+            self.branch_ends = []
     
     def process_elif_chain(self, elif_node, parent_id):
         """處理 elif 鏈"""
@@ -546,19 +554,27 @@ class FlowchartGenerator(ast.NodeVisitor):
         iter_expr = self.get_source_segment(node.iter)
         self.add_node(for_id, f'for {target} in {iter_expr}', 'rectangle','fill:#e3f2fd,stroke:#0d47a1,stroke-width:2px', node)
         
-        # 處理分支合併的情況（例如從 if 語句的多個分支）
+        # 處理分支合併的情況
         if self.branch_ends and not self.current_node:
             for end_node in self.branch_ends:
                 if end_node:
                     if end_node == self.pending_no_label:
-                        self.add_edge(end_node, for_id, 'No')
+                        node_label = self.node_meta.get(end_node, {}).get('label', '')
+                        if 'while' in node_label or 'for' in node_label:
+                            self.add_edge(end_node, for_id, 'No')
+                        else:
+                            self.add_edge(end_node, for_id, 'No')
                         self.pending_no_label = None
                     else:
                         self.add_edge(end_node, for_id)
             self.branch_ends = []
         elif self.current_node:
             if self.current_node == self.pending_no_label:
-                self.add_edge(self.current_node, for_id, 'No')
+                node_label = self.node_meta.get(self.current_node, {}).get('label', '')
+                if 'while' in node_label or 'for' in node_label:
+                    self.add_edge(self.current_node, for_id, 'No')
+                else:
+                    self.add_edge(self.current_node, for_id, 'No')
                 self.pending_no_label = None
             else:
                 self.add_edge(self.current_node, for_id)
@@ -572,49 +588,63 @@ class FlowchartGenerator(ast.NodeVisitor):
         break_nodes = []  # 收集 break 節點
         
         self.current_node = for_id
-        for stmt in node.body:
-            self.visit(stmt)
-            # 如果遇到 break收集 break 節點
-            if self.branch_ends and not self.current_node:
-                break_nodes.extend(self.branch_ends)
-                self.branch_ends = []
-                # 重要：設置 current_node 為 None確保後續語句被識別為可達
-                self.current_node = None
         
-        # 如果迴圈體正常結束（沒有 break/continue 導致 current_node 為 None)連接回迴圈開始
+        # 訪問 for 迴圈體內的所有語句
+        for stmt in node.body:
+            if self.branch_ends and not self.current_node:
+                # 檢查是否有 break 節點
+                temp_break_nodes = []
+                non_break_nodes = []
+                
+                for end_node in self.branch_ends:
+                    if end_node:
+                        node_label = self.node_meta.get(end_node, {}).get('label', '')
+                        if node_label == 'break':
+                            temp_break_nodes.append(end_node)
+                        else:
+                            non_break_nodes.append(end_node)
+                
+                # 收集 break 節點
+                break_nodes.extend(temp_break_nodes)
+                
+                # 非 break 的節點繼續執行下一個語句
+                if non_break_nodes:
+                    self.branch_ends = non_break_nodes
+                    # 保持 current_node 為 None，讓下一個 visit 處理分支合併
+                else:
+                    self.branch_ends = []
+            
+            self.visit(stmt)
+        
+        # 如果迴圈體正常結束，連接回迴圈開始
         if self.current_node and self.current_node != for_id:
             self.add_edge(self.current_node, for_id)
+        
+        # 處理 branch_ends 中的節點也要回到 for
+        if self.branch_ends:
+            for end_node in self.branch_ends:
+                if end_node and end_node != for_id:
+                    node_label = self.node_meta.get(end_node, {}).get('label', '')
+                    if node_label != 'break':
+                        self.add_edge(end_node, for_id)
+                    else:
+                        break_nodes.append(end_node)
+            self.branch_ends = []
         
         # 從堆疊中移除迴圈節點
         self.loop_stack.pop()
         
-        # 處理迴圈後的流程
+        # 處理 for 迴圈結束後的流程
         if break_nodes:
-            # 如果有 break這些節點將繼續執行迴圈後的程式碼
-            # 檢查是否在另一個迴圈內
-            if self.loop_stack:
-                # 在巢狀迴圈中break 後回到外層迴圈
-                parent_loop = self.loop_stack[-1]
-                for break_node in break_nodes:
-                    self.add_edge(break_node, parent_loop)
-                # 設置 current_node 為 None表示這個迴圈路徑已結束
-                self.current_node = None
-            else:
-                # 不在其他迴圈內 break 節點會成為後續程式的起點
-                self.current_node = None
-                self.branch_ends = break_nodes + [for_id]
+            # 如果有 break，這些節點將繼續執行迴圈後的程式碼
+            self.current_node = None
+            self.branch_ends = break_nodes + [for_id]
+            self.pending_no_label = for_id 
         else:
-            # 沒有 break正常的 for 迴圈結束
-            # 檢查是否在另一個迴圈內
-            if self.loop_stack:
-                # 在巢狀迴圈中，迴圈結束後回到外層迴圈
-                parent_loop = self.loop_stack[-1]
-                self.add_edge(for_id, parent_loop)
-                self.current_node = None
-            else:
-                # 不在其他迴圈內for_id 成為下一個語句的起點
-                self.current_node = for_id
-                self.branch_ends = old_branch_ends
+            # 沒有 break，正常的 for 迴圈結束
+            self.current_node = None
+            self.branch_ends = [for_id]
+            self.pending_no_label = for_id
     
     def visit_While(self, node):
         """處理 while 迴圈（支援 break/continue)"""
@@ -626,15 +656,42 @@ class FlowchartGenerator(ast.NodeVisitor):
         condition = self.get_source_segment(node.test)
         self.add_node(while_id, f'while {condition}', 'diamond','fill:#e3f2fd,stroke:#0d47a1,stroke-width:2px', node)
         
-        if self.current_node:
-            self.add_edge(self.current_node, while_id)
+        # 處理分支合併連接到 while
+        if self.branch_ends and not self.current_node:
+            for end_node in self.branch_ends:
+                if end_node:
+                    if end_node == self.pending_no_label:
+                        node_label = self.node_meta.get(end_node, {}).get('label', '')
+                        if 'while' in node_label:
+                            self.add_edge(end_node, while_id, 'False')
+                        elif 'for' in node_label:
+                            self.add_edge(end_node, while_id, 'No')
+                        else:
+                            self.add_edge(end_node, while_id, 'No')
+                        self.pending_no_label = None
+                    else:
+                        self.add_edge(end_node, while_id)
+            self.branch_ends = []
+        elif self.current_node:
+            if self.current_node == self.pending_no_label:
+                node_label = self.node_meta.get(self.current_node, {}).get('label', '')
+                if 'while' in node_label:
+                    self.add_edge(self.current_node, while_id, 'False')
+                elif 'for' in node_label:
+                    self.add_edge(self.current_node, while_id, 'No')
+                else:
+                    self.add_edge(self.current_node, while_id, 'No')
+                self.pending_no_label = None
+            else:
+                self.add_edge(self.current_node, while_id)
         
-        # 將迴圈節點加入堆疊（用於 break/continue)
+        # 將迴圈節點加入堆疊
         self.loop_stack.append(while_id)
         
         # 儲存當前狀態
         old_branch_ends = self.branch_ends[:]
         self.branch_ends = []
+        break_nodes = []
         
         self.current_node = while_id
         
@@ -645,26 +702,55 @@ class FlowchartGenerator(ast.NodeVisitor):
                 self.fix_last_edge_label(while_id, 'True')
                 first_in_body = False
             else:
+                # ===== 同樣的修改：處理循環內的多分支合併 =====
+                if self.branch_ends and not self.current_node:
+                    temp_break_nodes = []
+                    non_break_nodes = []
+                    
+                    for end_node in self.branch_ends:
+                        if end_node:
+                            node_label = self.node_meta.get(end_node, {}).get('label', '')
+                            if node_label == 'break':
+                                temp_break_nodes.append(end_node)
+                            else:
+                                non_break_nodes.append(end_node)
+                    
+                    break_nodes.extend(temp_break_nodes)
+                    
+                    if non_break_nodes:
+                        self.branch_ends = non_break_nodes
+                    else:
+                        self.branch_ends = []
+                
                 self.visit(stmt)
         
-        # 如果迴圈體正常結束（沒有 break)連接回迴圈開始
+        # 迴圈體正常結束，連接回 while
         if self.current_node and self.current_node != while_id:
             self.add_edge(self.current_node, while_id)
+        
+        # 處理 branch_ends 中的節點
+        if self.branch_ends:
+            for end_node in self.branch_ends:
+                if end_node and end_node != while_id:
+                    node_label = self.node_meta.get(end_node, {}).get('label', '')
+                    if node_label != 'break':
+                        self.add_edge(end_node, while_id)
+                    else:
+                        break_nodes.append(end_node)
+            self.branch_ends = []
         
         # 從堆疊中移除迴圈節點
         self.loop_stack.pop()
         
-        # 這次從這裡開始改耶比
-        # while 條件為 False 時，從 while_id 繼續執行後面的代碼
-        if self.branch_ends:
-            # 同時處理 break 出口和 False 出口
-            self.branch_ends.append(while_id)
-            self.pending_no_label = while_id  
-            self.current_node = None  # 多個分支合併
+        # 處理 while 迴圈結束後的流程
+        if break_nodes:
+            self.branch_ends = break_nodes + [while_id]
+            self.pending_no_label = while_id
+            self.current_node = None
         else:
-            # 沒有 break 只有 False 出口
-            self.current_node = while_id
-            self.pending_no_label = while_id  # 下一條邊標記為 "False"
+            self.branch_ends = [while_id]
+            self.current_node = None
+            self.pending_no_label = while_id
     
     def visit_Return(self, node):
         """處理 return 語句"""
@@ -916,10 +1002,16 @@ class FlowchartGenerator(ast.NodeVisitor):
         
         self.add_node(node_id, f'{target} {op}= {value}', 'rectangle','fill:#ffffff,stroke:#424242,stroke-width:2px', node)
         
-        if self.current_node:
+        # 處理分支合併
+        if self.branch_ends and not self.current_node:
+            for end_node in self.branch_ends:
+                if end_node:
+                    self.add_edge(end_node, node_id)
+            self.branch_ends = []
+        elif self.current_node:
             self.add_edge(self.current_node, node_id)
-        
-        self.current_node = node_id
+    
+        self.current_node = node_id  
     
     def visit_Try(self, node):
         """處理 try-except 語句"""
@@ -945,6 +1037,16 @@ class FlowchartGenerator(ast.NodeVisitor):
             right = self.get_source_segment(node.right)
             op = self.get_op_symbol(node.op)
             return f'{left} {op} {right}'
+        elif isinstance(node, ast.BoolOp):
+            # 處理 and/or 運算
+            op = self.get_op_symbol(node.op)
+            values = [self.get_source_segment(v) for v in node.values]
+            return f' {op} '.join(values)
+        elif isinstance(node, ast.UnaryOp):
+            # 處理 not 等一元運算
+            op = self.get_op_symbol(node.op)
+            operand = self.get_source_segment(node.operand)
+            return f'{op} {operand}'
         elif isinstance(node, ast.Compare):
             left = self.get_source_segment(node.left)
             ops = [self.get_op_symbol(op) for op in node.ops]
