@@ -10,6 +10,7 @@ export interface PseudocodeResult {
     lineMapping: LineMapping[];
 }
 
+// map 'lineno-of-python : number' to 'lineno-of-pseudocode : number'
 function buildLineMapping(pythonCode: string, pseudocode: string): LineMapping[] {
     if (!pythonCode || !pseudocode) {
         console.warn('buildLineMapping: pythonCode or pseudocode is empty');

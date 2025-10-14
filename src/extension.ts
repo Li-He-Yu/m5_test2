@@ -17,12 +17,14 @@ let pseudocodeHistory: string[] = [];
 
 // mapping relation
 // @Param:
-//    lineToNodeMap       : map 'lineno-of-code : number' to 'nodeId: string'
-//    currentLineMapping  : ?
-//    pseudocodeToLineMap : map 'lineno-of-pseudocode : number' to 'lineno-of-code : number'
-//    nodeIdToLine        : map 'nodeId-of-flowchart-element : string' to 'lineno-of-code : number'
+//    lineToNodeMap                : map 'lineno-of-code : number' to 'nodeId: string'
+//    currentLineMapping           : map 'lineno-of-code : number' to 'lineno-of-pseudocode : number'
+//    codelinenoToPseudocodelineno : map 'lineno-of-code : number' to 'lineno-of-pseudocode : number[]'
+//    pseudocodeToLineMap          : map 'lineno-of-pseudocode : number' to 'lineno-of-code : number'
+//    nodeIdToLine                 : map 'nodeId-of-flowchart-element : string' to 'lineno-of-code : number'
 export let lineToNodeMap: Map<number, string[]> = new Map();
 let currentLineMapping: Array<{pythonLine: number, pseudocodeLine: number}> = [];
+export const codelinenoToPseudocodelineno: Map<number, number[]> = new Map();
 export let pseudocodeToLineMap: Map<number, number> = new Map();
 let fullPseudocodeGenerated = false;
 export const nodeIdToLine = new Map<string, number | null>();
