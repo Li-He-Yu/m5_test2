@@ -14,13 +14,17 @@ const pseudocodeCache = new Map<string, string>();
 let pseudocodeHistory: string[] = [];
 
 // mapping relation
+// @Param:
+//    lineToNodeMap       : map 'lineno-of-code : number' to 'nodeId: string'
+//    currentLineMapping  : ?
+//    pseudocodeToLineMap : map 'lineno-of-pseudocode : number' to 'lineno-of-code : number'
+//    nodeIdToLine        : map 'nodeId-of-flowchart-element : string' to 'lineno-of-code : number'
 let lineToNodeMap: Map<number, string[]> = new Map();
 let currentLineMapping: Array<{pythonLine: number, pseudocodeLine: number}> = [];
 let pseudocodeToLineMap: Map<number, number> = new Map();
 let fullPseudocodeGenerated = false;
 
 export const nodeIdToLine = new Map<string, number | null>();
-const nodeIdToLabel = new Map<string, string>();
 
 export function activate(context: vscode.ExtensionContext) {
     const extensionPath = context.extensionPath;
