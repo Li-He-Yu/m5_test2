@@ -3,7 +3,9 @@ import * as path from 'path';
 import { codeToPseudocode, PseudocodeResult } from './claudeApi';
 import * as dotenv from 'dotenv';
 import { parsePythonWithAST } from './pythonAnalyzer';
-import { FlowchartNodeClickEventHandler, clearEditor, handlePseudocodeLineClick } from './WebviewEventHandler';
+import { FlowchartNodeClickEventHandler, clearEditor, handlePseudocodeLineClick,
+    clearHighlightInWebviewPanel, highlightNodesAndPseudocodeInWebview
+} from './WebviewEventHandler';
 
 
 export let sourceDocUri: vscode.Uri | undefined;
@@ -197,15 +199,9 @@ export function activate(context: vscode.ExtensionContext) {
             if (allNodeIds.size > 0 || pythonLines.length > 0) {
                 console.log('Highlighting nodes for Python lines:', Array.from(allNodeIds), pythonLines);
                 
-                currentPanel.webview.postMessage({
-                    command: 'highlightNodesAndPseudocode',
-                    nodeIds: Array.from(allNodeIds),
-                    pseudocodeLines: pythonLines
-                });
+                highlightNodesAndPseudocodeInWebview(Array.from(allNodeIds), pythonLines);
             } else {
-                currentPanel.webview.postMessage({
-                    command: 'clearHighlight'
-                });
+                clearHighlightInWebviewPanel();
             }
         } else {
             const lineNumber = selection.active.line + 1;
@@ -217,15 +213,9 @@ export function activate(context: vscode.ExtensionContext) {
             if (nodeIds && nodeIds.length > 0) {
                 console.log('Found nodes for line', lineNumber, ':', nodeIds);
                 
-                currentPanel.webview.postMessage({
-                    command: 'highlightNodesAndPseudocode',
-                    nodeIds: nodeIds,
-                    pseudocodeLines: [lineNumber]
-                });
+                highlightNodesAndPseudocodeInWebview(nodeIds, [lineNumber]);
             } else {
-                currentPanel.webview.postMessage({
-                    command: 'clearHighlight'
-                });
+                clearHighlightInWebviewPanel();
             }
         }
     });

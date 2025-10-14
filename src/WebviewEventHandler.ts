@@ -62,7 +62,7 @@ export async function FlowchartNodeClickEventHandler(
 	
 	// this event do for Pseudocode Area
 	// 發送消息到 webview 高亮對應的 pseudocode 行
-	highlightPesudocodeInWebview([message.nodeId], lines);
+	highlightNodesAndPseudocodeInWebview([message.nodeId], lines);
 }
 
 
@@ -114,7 +114,7 @@ export async function handlePseudocodeLineClick(
 	console.log('Mapped to nodes:', nodeIds);
 	
 	// // 發送消息到 webview 高亮對應的 flowchart 節點和 pseudocode
-	highlightPesudocodeInWebview(nodeIds || [], [pythonLine]);
+	highlightNodesAndPseudocodeInWebview(nodeIds || [], [pythonLine]);
 }
 
 
@@ -147,6 +147,13 @@ async function getSourceEditor(): Promise<vscode.TextEditor | undefined> {
     // });
 }
 
+//////////////////////////////////////////////////
+// 												//
+// 					Helper						//
+// 												//
+//////////////////////////////////////////////////
+
+
 function highlightEditor(
 	editor: typeof vscode.window.activeTextEditor,
 	ranges: readonly vscode.Range[]
@@ -174,7 +181,7 @@ export function clearEditor(editor: typeof vscode.window.activeTextEditor): void
 	highlightEditor(editor, []);
 }
 
-function clearHighlightInWebviewPanel(){
+export function clearHighlightInWebviewPanel(){
 	// 清除 webview 中的高亮
 	if (currentPanel) {
 		currentPanel.webview.postMessage({
@@ -183,7 +190,7 @@ function clearHighlightInWebviewPanel(){
 	}
 }
 
-function highlightPesudocodeInWebview(paramNodeIds: string[], lines: number[]){
+export function highlightNodesAndPseudocodeInWebview(paramNodeIds: string[], lines: number[]){
 	// 發送消息到 webview 高亮對應的 pseudocode 行
 	if (currentPanel) {
 		currentPanel.webview.postMessage({
