@@ -24,7 +24,7 @@ let pseudocodeHistory: string[] = [];
 //    nodeIdToLine                 : map 'nodeId-of-flowchart-element : string' to 'lineno-of-code : number'
 export let lineToNodeMap: Map<number, string[]> = new Map();
 let currentLineMapping: Array<{pythonLine: number, pseudocodeLine: number}> = [];
-export const codelinenoToPseudocodelineno: Map<number, number[]> = new Map();
+export const codelinenoToPseudocodelineno: Map<number[], number[]> = new Map();
 export let pseudocodeToLineMap: Map<number, number> = new Map();
 let fullPseudocodeGenerated = false;
 export const nodeIdToLine = new Map<string, number | null>();
@@ -399,6 +399,7 @@ async function convertToPseudocode(isAutoUpdate: boolean = false) {
             currentLineMapping = result.lineMapping;
 
             pseudocodeToLineMap.clear();
+            pseudocodeToLineMap = result.pseudoLineToSrcLines;
             result.lineMapping.forEach(mapping => {
                 pseudocodeToLineMap.set(mapping.pseudocodeLine, mapping.pythonLine);
             });

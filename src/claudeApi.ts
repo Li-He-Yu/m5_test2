@@ -8,6 +8,8 @@ export interface LineMapping {
 export interface PseudocodeResult {
     pseudocode: string;
     lineMapping: LineMapping[];
+    srcLineToPseudoLines: Map<number, number[]>;
+    pseudoLineToSrcLines: Map<number, number[]>;
 }
 
 // map 'lineno-of-python : number' to 'lineno-of-pseudocode : number'
@@ -135,11 +137,20 @@ export async function codeToPseudocode(code: string): Promise<PseudocodeResult> 
 
     const endpoint = 'https://api.anthropic.com/v1/messages';
     const userMessage = `
-You are a code to pseudocode converter. Your task is to convert any given code into pseudocode format. Follow these strict guidelines:
+You are a code → pseudocode converter. Convert the given source code into pseudocode AND produce a line mapping.
 
 ### Output Requirements
 
-- ONLY output pseudocode, no explanations, comments, or additional text
+- Return ONLY a single, valid JSON object (no prose before/after).
+- JSON schema:
+  {
+    "pseudocode": "<string with \\n newlines>",
+    "mapping": [ [ [<srcLine>...], [<pseudoLine>...] ], ... ]
+  }
+  - mapping is an array of pairs: [sourceLines[], pseudoLines[]]
+  - All line numbers are 1-based positive integers.
+  - Keep arrays small: merge only when a single pseudocode line summarizes multiple source lines (e.g., multi-line conditions or list/dict literals).
+
 - Use consistent terminology and structure across all conversions
 - Write in clear, readable English-like syntax
 - Skip blank lines and comments - only convert actual code statements
@@ -232,6 +243,16 @@ OUTPUT y
 
 </examples>
 
+### Example Output (JSON)
+{
+  "pseudocode": "FOR i FROM 0 TO 4 DO\\n    FOR j FROM 0 TO 4 DO\\n        OUTPUT 4",
+  "mapping": [
+    [[1],[1]],
+    [[2],[2]],
+    [[3],[3]]
+  ]
+}
+
 ## Pseudocode Style Guidelines
 
 ### Control Structures
@@ -289,13 +310,18 @@ OUTPUT y
 
 ### Important Rules
 
-- One Python statement = One pseudocode line
+- One source statement = one pseudocode line, unless collapsing is clearly more readable (then reflect that in mapping by mapping multiple source lines to one pseudocode line).
 - Maintain the exact same indentation level as the original code (use 4 spaces per indentation level to match Python convention)
 - Do not add extra lines for END IF, END WHILE, END FUNCTION, etc.
 - Preserve the logical flow and structure of the original code
 - Nested structures should have correspondingly deeper indentation
 
-When given code, respond with only the pseudocode using the above conventions:\n${code}`;
+## Response Contract
+- Return ONLY a single JSON object with keys "pseudocode" and "mapping".
+- Ensure JSON is syntactically valid (no trailing commas, no comments).
+- Do not include any text outside the JSON.
+
+Now convert the following source code and produce the JSON described above:\n${code}`;
 
     try {
         const response = await axios.post(
@@ -323,19 +349,22 @@ When given code, respond with only the pseudocode using the above conventions:\n
             throw new Error('API 返回格式錯誤');
         }
 
-        const pseudocode = response.data.content[0].text;
+        const claudResult = response.data.content[0].text;
         
-        if (!pseudocode || typeof pseudocode !== 'string') {
+        if (!claudResult || typeof claudResult !== 'string') {
             throw new Error('API 返回的 pseudocode 無效');
         }
 
-        console.log('Pseudocode received, length:', pseudocode.length);
+        console.log('Pseudocode received, length:', claudResult.length);
         
-        const lineMapping = buildLineMapping(code, pseudocode);
+        const lineMapping = buildLineMapping(code, claudResult);
+        const {pseudocode, codelinenoToPseudocodelineno, srcLineToPseudoLines, pseudoLineToSrcLines, entries} = parseLLMResult(claudResult);
 
         return {
             pseudocode,
-            lineMapping
+            lineMapping,
+            srcLineToPseudoLines,
+            pseudoLineToSrcLines
         };
     } catch (err: any) {
         console.error('codeToPseudocode error:', err);
@@ -349,4 +378,159 @@ When given code, respond with only the pseudocode using the above conventions:\n
             throw new Error('未知錯誤: ' + String(err));
         }
     }
+}
+
+
+
+
+// ---------- Types
+export type MappingEntry = { src: number[]; pseudo: number[] };
+
+export type ParsedLLM = {
+  pseudocode: string;
+  /** ⚠️ Arrays as keys are identity-based; use the indexes below for lookups */
+  codelinenoToPseudocodelineno: Map<number[], number[]>;
+  /** Value-indexed maps for efficient lookups */
+  srcLineToPseudoLines: Map<number, number[]>;
+  pseudoLineToSrcLines: Map<number, number[]>;
+  /** Also keep normalized entries for inspection or re-serialization */
+  entries: MappingEntry[];
+};
+
+// ---------- A. Parse LLM result JSON into structures
+export function parseLLMResult(resultJson: string | { pseudocode: string; mapping: any }): ParsedLLM {
+  let obj: any;
+  if (typeof resultJson === "string") {
+    try {
+      obj = JSON.parse(resultJson);
+    } catch (e) {
+      throw new Error("LLM result is not valid JSON.");
+    }
+  } else {
+    obj = resultJson;
+  }
+
+  // Validate shape
+  if (!obj || typeof obj.pseudocode !== "string" || !Array.isArray(obj.mapping)) {
+    throw new Error('LLM JSON must have { "pseudocode": string, "mapping": [...] }');
+  }
+
+  // Parse mapping into normalized entries
+  const { entries, codelinenoToPseudocodelineno, srcLineToPseudoLines, pseudoLineToSrcLines } =
+    parseCodeToPseudocodeMap(obj.mapping);
+
+  return {
+    pseudocode: obj.pseudocode,
+    codelinenoToPseudocodelineno,
+    srcLineToPseudoLines,
+    pseudoLineToSrcLines,
+    entries,
+  };
+}
+
+/**
+ * 3) Parse the mapping block into:
+ *   - entries:  { src:number[], pseudo:number[] }[]
+ *   - codelinenoToPseudocodelineno: Map<number[], number[]>
+ *   - srcLineToPseudoLines:  Map<number, number[]>
+ *   - pseudoLineToSrcLines:  Map<number, number[]>
+ *
+ * The incoming format is like:
+ *   [
+ *     [[1], [1]],
+ *     [[3], [2,3]],
+ *     [[11,12,13], [9]],
+ *     ...
+ *   ]
+ */
+export function parseCodeToPseudocodeMap(
+  mapping: unknown
+): {
+  entries: MappingEntry[];
+  codelinenoToPseudocodelineno: Map<number[], number[]>;
+  srcLineToPseudoLines: Map<number, number[]>;
+  pseudoLineToSrcLines: Map<number, number[]>;
+} {
+  if (!Array.isArray(mapping)) {
+    throw new Error("mapping must be an array");
+  }
+
+  const entries: MappingEntry[] = [];
+  const codelinenoToPseudocodelineno = new Map<number[], number[]>();
+
+  const srcLineToPseudoLines = new Map<number, number[]>();
+  const pseudoLineToSrcLines = new Map<number, number[]>();
+
+  for (const pair of mapping) {
+    // Expect each item like: [[src...],[pseudo...]]
+    if (!Array.isArray(pair) || pair.length !== 2) continue;
+
+    const srcArr = Array.isArray(pair[0]) ? pair[0].map(n => toPosInt(n)).filter(isFiniteNumber) : [];
+    const pseudoArr = Array.isArray(pair[1]) ? pair[1].map(n => toPosInt(n)).filter(isFiniteNumber) : [];
+
+    if (srcArr.length === 0 || pseudoArr.length === 0) continue;
+
+    // Keep canonical sorted, unique
+    const src = uniqueSorted(srcArr);
+    const pseudo = uniqueSorted(pseudoArr);
+
+    entries.push({ src, pseudo });
+
+    // Spec-required (but identity-based) map
+    codelinenoToPseudocodelineno.set(src, pseudo);
+
+    // Build fast inverted indexes
+    for (const s of src) {
+      const list = srcLineToPseudoLines.get(s) ?? [];
+      pushManyUnique(list, pseudo);
+      srcLineToPseudoLines.set(s, list);
+    }
+    for (const p of pseudo) {
+      const list = pseudoLineToSrcLines.get(p) ?? [];
+      pushManyUnique(list, src);
+      pseudoLineToSrcLines.set(p, list);
+    }
+  }
+
+  // Normalize index lists
+  for (const [k, v] of srcLineToPseudoLines) srcLineToPseudoLines.set(k, uniqueSorted(v));
+  for (const [k, v] of pseudoLineToSrcLines) pseudoLineToSrcLines.set(k, uniqueSorted(v));
+
+  return { entries, codelinenoToPseudocodelineno, srcLineToPseudoLines, pseudoLineToSrcLines };
+}
+
+// ---------- B. Efficient lookup helpers
+
+/** Given a source-code line (1-based), return the mapped pseudocode lines (or empty array). */
+export function findPseudoBySrc(
+  line: number,
+  srcLineToPseudoLines: Map<number, number[]>
+): number[] {
+  return srcLineToPseudoLines.get(line) ?? [];
+}
+
+/** Given a pseudocode line (1-based), return the mapped source-code lines (or empty array). */
+export function findSrcByPseudo(
+  line: number,
+  pseudoLineToSrcLines: Map<number, number[]>
+): number[] {
+  return pseudoLineToSrcLines.get(line) ?? [];
+}
+
+// ---------- Small utils
+
+function toPosInt(n: any): number {
+  const v = Number(n);
+  if (!Number.isInteger(v) || v <= 0) return NaN;
+  return v;
+}
+function isFiniteNumber(n: number): boolean {
+  return Number.isFinite(n);
+}
+function uniqueSorted(nums: number[]): number[] {
+  return Array.from(new Set(nums)).sort((a, b) => a - b);
+}
+function pushManyUnique(dst: number[], src: number[]) {
+  const seen = new Set(dst);
+  for (const n of src) if (!seen.has(n)) { dst.push(n); seen.add(n); }
 }
