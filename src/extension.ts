@@ -1,29 +1,31 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
-import * as fs from 'fs';
-import * as os from 'os';
-import { spawn } from 'child_process';
 import { codeToPseudocode, PseudocodeResult } from './claudeApi';
-import { PythonCodeBlockParser, CodeBlock, CodeBlockType } from './codeBlockParser';
 import * as dotenv from 'dotenv';
 import { parsePythonWithAST } from './pythonAnalyzer';
-import { WebViewNodeClickEventHandler, clearEditor, setWebviewPanel, handlePseudocodeLineClick, setMappings } from './WebviewEventHandler';
+import { FlowchartNodeClickEventHandler, clearEditor, handlePseudocodeLineClick,
+    clearHighlightInWebviewPanel, highlightNodesAndPseudocodeInWebview
+} from './WebviewEventHandler';
 
 
 export let sourceDocUri: vscode.Uri | undefined;
-let currentPanel: vscode.WebviewPanel | undefined;
-let lineToNodeMap: Map<number, string[]> = new Map();
+export let currentPanel: vscode.WebviewPanel | undefined;
 let nodeOrder: string[] = [];
 
 const pseudocodeCache = new Map<string, string>();
 let pseudocodeHistory: string[] = [];
 
+// mapping relation
+// @Param:
+//    lineToNodeMap       : map 'lineno-of-code : number' to 'nodeId: string'
+//    currentLineMapping  : ?
+//    pseudocodeToLineMap : map 'lineno-of-pseudocode : number' to 'lineno-of-code : number'
+//    nodeIdToLine        : map 'nodeId-of-flowchart-element : string' to 'lineno-of-code : number'
+export let lineToNodeMap: Map<number, string[]> = new Map();
 let currentLineMapping: Array<{pythonLine: number, pseudocodeLine: number}> = [];
-let pseudocodeToLineMap: Map<number, number> = new Map();
+export let pseudocodeToLineMap: Map<number, number> = new Map();
 let fullPseudocodeGenerated = false;
-
 export const nodeIdToLine = new Map<string, number | null>();
-const nodeIdToLabel = new Map<string, string>();
 
 export function activate(context: vscode.ExtensionContext) {
     const extensionPath = context.extensionPath;
@@ -102,7 +104,7 @@ export function activate(context: vscode.ExtensionContext) {
 
                 currentPanel.onDidDispose(() => {
                     currentPanel = undefined;
-                    setWebviewPanel(undefined);
+                    // setWebviewPanel(undefined);
                     pseudocodeHistory = [];
                     currentLineMapping = [];
                     pseudocodeToLineMap.clear();
@@ -111,7 +113,7 @@ export function activate(context: vscode.ExtensionContext) {
             }
 
             // 設置 webview panel 引用
-            setWebviewPanel(currentPanel);
+            // setWebviewPanel(currentPanel);
 
             currentPanel.webview.html = await getWebviewHtmlExternal(
                 currentPanel.webview,
@@ -124,16 +126,8 @@ export function activate(context: vscode.ExtensionContext) {
             currentPanel.webview.onDidReceiveMessage(
                 message => {
                     switch (message.command) {
-                        case 'nodeClicked':
-                            break;
-                        case 'requestNodeOrder':
-                            currentPanel?.webview.postMessage({
-                                command: 'setNodeOrder',
-                                nodeOrder: nodeOrder
-                            });
-                            break;
-                        case 'webview.nodeClicked':
-                            WebViewNodeClickEventHandler(message);
+                        case 'webview.FlowchartNodeClicked':
+                            FlowchartNodeClickEventHandler(message);
                             break;
                         case 'webview.requestClearEditor':
                             clearEditor(editor);
@@ -209,15 +203,9 @@ export function activate(context: vscode.ExtensionContext) {
             if (allNodeIds.size > 0 || pythonLines.length > 0) {
                 console.log('Highlighting nodes for Python lines:', Array.from(allNodeIds), pythonLines);
                 
-                currentPanel.webview.postMessage({
-                    command: 'highlightNodesAndPseudocode',
-                    nodeIds: Array.from(allNodeIds),
-                    pseudocodeLines: pythonLines
-                });
+                highlightNodesAndPseudocodeInWebview(Array.from(allNodeIds), pythonLines);
             } else {
-                currentPanel.webview.postMessage({
-                    command: 'clearHighlight'
-                });
+                clearHighlightInWebviewPanel();
             }
         } else {
             const lineNumber = selection.active.line + 1;
@@ -229,15 +217,9 @@ export function activate(context: vscode.ExtensionContext) {
             if (nodeIds && nodeIds.length > 0) {
                 console.log('Found nodes for line', lineNumber, ':', nodeIds);
                 
-                currentPanel.webview.postMessage({
-                    command: 'highlightNodesAndPseudocode',
-                    nodeIds: nodeIds,
-                    pseudocodeLines: [lineNumber]
-                });
+                highlightNodesAndPseudocodeInWebview(nodeIds, [lineNumber]);
             } else {
-                currentPanel.webview.postMessage({
-                    command: 'clearHighlight'
-                });
+                clearHighlightInWebviewPanel();
             }
         }
     });
@@ -533,7 +515,7 @@ async function convertToPseudocode(isAutoUpdate: boolean = false) {
             console.log('Pseudocode to line map created:', Array.from(pseudocodeToLineMap.entries()));
             
             // 設置映射到 WebviewEventHandler
-            setMappings(pseudocodeToLineMap, lineToNodeMap);
+            // setMappings(pseudocodeToLineMap, lineToNodeMap);
             
             pseudocodeHistory = [];
             addToPseudocodeHistory(result.pseudocode);

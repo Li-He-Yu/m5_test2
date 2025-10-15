@@ -402,7 +402,7 @@
             if (rawId.includes('Start')) nodeId = 'Start';
             if (rawId.includes('End'))   nodeId = 'End';
 
-            vscode.postMessage({ command: 'webview.nodeClicked', nodeId });
+            vscode.postMessage({ command: 'webview.FlowchartNodeClicked', nodeId });
             highlightNodes([nodeId]);
         });
         
