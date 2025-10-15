@@ -647,6 +647,8 @@
         }
 
         // 在 updatePseudocodeDisplay 函數中修改
+    
+
         function updatePseudocodeDisplay(pseudocode) {
             const pseudocodeContent = document.getElementById('pseudocode-content');
             if (!pseudocodeContent) return;
@@ -672,19 +674,93 @@
             
             pseudocodeContent.innerHTML = html;
             
-            // 添加點擊事件監聽
+            // 添加單行點擊事件
             const pseudoLines = pseudocodeContent.querySelectorAll('.pseudocode-line');
             pseudoLines.forEach(lineEl => {
-                lineEl.addEventListener('click', function() {
+                lineEl.addEventListener('click', function(e) {
+                    // 只在沒有選取文本時才觸發單行點擊
+                    const selection = window.getSelection();
+                    if (selection && !selection.isCollapsed) {
+                        return;
+                    }
+                    
                     const pseudoLineNum = parseInt(this.getAttribute('data-line-number'));
                     console.log('Pseudocode line clicked:', pseudoLineNum);
                     
-                    // 發送消息到 extension
                     vscode.postMessage({ 
                         command: 'webview.pseudocodeLineClicked', 
                         pseudocodeLine: pseudoLineNum 
                     });
                 });
+            });
+            
+            //添加多行選取事件
+            pseudocodeContent.addEventListener('mouseup', function(e) {
+                
+                setTimeout(() => {
+                    const selection = window.getSelection();
+                    if (!selection || selection.isCollapsed) {
+                        return;
+                    }
+                    
+                    const selectedText = selection.toString();
+                    if (!selectedText.trim()) {
+                        return;
+                    }
+                    
+                    console.log('=== Pseudocode Selection Debug ===');
+                    console.log('Selected text:', selectedText);
+                    
+                    //計算選取的行號
+                    const selectedLines = [];
+                    
+                    //找到選取範圍的起始和結束元素
+                    const range = selection.getRangeAt(0);
+                    const startContainer = range.startContainer;
+                    const endContainer = range.endContainer;
+                    
+                    //找到起始和結束的 pseudocode-line 元素
+                    let startLine = startContainer.nodeType === 3 ? 
+                                    startContainer.parentElement.closest('.pseudocode-line') : 
+                                    startContainer.closest('.pseudocode-line');
+                    let endLine = endContainer.nodeType === 3 ? 
+                                endContainer.parentElement.closest('.pseudocode-line') : 
+                                endContainer.closest('.pseudocode-line');
+                    
+                    if (!startLine || !endLine) {
+                        console.log('Could not find start or end line elements');
+                        return;
+                    }
+                    
+                    const startLineNum = parseInt(startLine.getAttribute('data-line-number'));
+                    const endLineNum = parseInt(endLine.getAttribute('data-line-number'));
+                    
+                    console.log('Start line:', startLineNum);
+                    console.log('End line:', endLineNum);
+                    
+                    //確保順序正確
+                    const minLine = Math.min(startLineNum, endLineNum);
+                    const maxLine = Math.max(startLineNum, endLineNum);
+                    
+                    //收集所有選中的行號
+                    for (let i = minLine; i <= maxLine; i++) {
+                        selectedLines.push(i);
+                    }
+                    
+                    console.log('Selected pseudocode lines:', selectedLines);
+                    
+                    if (selectedLines.length > 0) {
+                        console.log('Sending webview.pseudocodeLinesClicked message');
+                        
+                        //發送多行選取消息
+                        vscode.postMessage({
+                            command: 'webview.pseudocodeLinesClicked',
+                            pseudocodeLines: selectedLines
+                        });
+                    } else {
+                        console.log('No lines selected');
+                    }
+                }, 10);
             });
             
             console.log('Pseudocode display updated with', lines.length, 'lines');

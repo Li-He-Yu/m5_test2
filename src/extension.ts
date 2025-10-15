@@ -148,6 +148,10 @@ export function activate(context: vscode.ExtensionContext) {
                         case 'webview.pseudocodeLineClicked':
                             handlePseudocodeLineClick(message.pseudocodeLine);
                             break;
+                        case 'webview.pseudocodeLinesClicked':
+                            console.log('收到 webview.pseudocodeLinesClicked 消息:', message);
+                            handlePseudocodeLinesClick(message.pseudocodeLines);
+                            break;
                     }
                 },
                 undefined,
@@ -243,6 +247,114 @@ export function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(disposable, onChangeDisposable, clearHistoryDisposable);
 }
 
+function handlePseudocodeLinesClick(pseudocodeLines: number[]) {
+    console.log('=== handlePseudocodeLinesClick Debug ===');
+    console.log('收到的 pseudocode 行號:', pseudocodeLines);
+    
+    // 檢查是否已生成完整的 pseudocode
+    if (!fullPseudocodeGenerated || pseudocodeToLineMap.size === 0) {
+        const message = '請先執行 "Convert to Pseudocode" 命令生成映射';
+        vscode.window.showWarningMessage(message);
+        console.warn('pseudocodeToLineMap 為空或未生成完整 pseudocode');
+        console.warn('fullPseudocodeGenerated:', fullPseudocodeGenerated);
+        console.warn('pseudocodeToLineMap.size:', pseudocodeToLineMap.size);
+        return;
+    }
+    
+    // 檢查 sourceDocUri 是否存在
+    if (!sourceDocUri) {
+        console.error('sourceDocUri 未設置');
+        vscode.window.showErrorMessage('找不到源文件，請重新生成 flowchart');
+        return;
+    }
+    
+    console.log('當前 pseudocodeToLineMap 大小:', pseudocodeToLineMap.size);
+    console.log('pseudocodeToLineMap 內容:', Array.from(pseudocodeToLineMap.entries()).slice(0, 10));
+    
+    // 將 pseudocode 行映射到 Python 行
+    const pythonLines = new Set<number>();
+    const allNodeIds = new Set<string>();
+    
+    pseudocodeLines.forEach(pseudoLine => {
+        const pythonLine = pseudocodeToLineMap.get(pseudoLine);
+        console.log(`映射: Pseudo 行 ${pseudoLine} -> Python 行 ${pythonLine}`);
+        
+        if (pythonLine !== undefined) {
+            pythonLines.add(pythonLine);
+            
+            // 獲取對應的節點
+            const nodeIds = lineToNodeMap.get(pythonLine);
+            console.log(`  Python 行 ${pythonLine} 對應的節點:`, nodeIds);
+            
+            if (nodeIds && nodeIds.length > 0) {
+                nodeIds.forEach(id => allNodeIds.add(id));
+            }
+        } else {
+            console.warn(`  找不到 pseudocode 行 ${pseudoLine} 的映射`);
+        }
+    });
+    
+    if (pythonLines.size === 0) {
+        console.error('找不到對應的 Python 代碼行');
+        vscode.window.showWarningMessage('找不到對應的 Python 代碼行');
+        return;
+    }
+    
+    console.log('映射到的 Python 行:', Array.from(pythonLines));
+    console.log('映射到的節點:', Array.from(allNodeIds));
+    
+    //找到最小和最大的 Python 行號
+    const sortedLines = Array.from(pythonLines).sort((a, b) => a - b);
+    const startLine = sortedLines[0] - 1; // VS Code 使用 0-based index
+    const endLine = sortedLines[sortedLines.length - 1] - 1;
+    
+    console.log('選取範圍: 行', startLine, '到', endLine, '(0-based)');
+    
+    //使用 sourceDocUri 打開文檔並設置選取
+    vscode.window.showTextDocument(sourceDocUri, {
+        viewColumn: vscode.ViewColumn.One,
+        preserveFocus: false  // 將焦點移到編輯器
+    }).then(editor => {
+        try {
+            //清除編輯器現有裝飾
+            clearEditor(editor);
+            
+            //在編輯器中選中對應的代碼行
+            const newSelection = new vscode.Selection(
+                new vscode.Position(startLine, 0),
+                new vscode.Position(endLine, editor.document.lineAt(endLine).text.length)
+            );
+            
+            editor.selection = newSelection;
+            editor.revealRange(newSelection, vscode.TextEditorRevealType.InCenter);
+            
+            console.log('編輯器選取已設置');
+            
+            // 高亮對應的節點和 pseudocode 行
+            if (currentPanel) {
+                const message = {
+                    command: 'highlightNodesAndPseudocode',
+                    nodeIds: Array.from(allNodeIds),
+                    pseudocodeLines: Array.from(pythonLines)
+                };
+                
+                console.log('發送高亮消息到 webview:', message);
+                currentPanel.webview.postMessage(message);
+            } else {
+                console.error('沒有當前的面板');
+            }
+            
+            console.log('=== handlePseudocodeLinesClick 完成 ===');
+            
+        } catch (error) {
+            console.error('選擇代碼時出錯:', error);
+            vscode.window.showErrorMessage('選擇代碼時出錯: ' + error);
+        }
+    }, error => {
+        console.error('無法打開文檔:', error);
+        vscode.window.showErrorMessage('無法打開源文件: ' + error);
+    });
+}
 function addToPseudocodeHistory(pseudocode: string) {
     pseudocodeHistory.push(pseudocode);
     const maxHistory = 50;
@@ -274,10 +386,7 @@ function updateWebviewPseudocode() {
     }
 }
 
-// ❌ 刪除這個函數定義（第 275-295 行）
-// function handlePseudocodeLineClick(pseudocodeLine: number, editor: vscode.TextEditor) {
-//     ...
-// }
+
 
 export function nodeIdStringIsStartOrEnd(nodeId: string): Boolean {
     return nodeId === "Start" || nodeId === "End";
