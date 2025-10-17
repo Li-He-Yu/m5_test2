@@ -359,6 +359,7 @@ Now convert the following source code and produce the JSON described above:\n${c
         
         const lineMapping = buildLineMapping(code, claudResult);
         const {pseudocode, codelinenoToPseudocodelineno, srcLineToPseudoLines, pseudoLineToSrcLines, entries} = parseLLMResult(claudResult);
+        console.log("claud raw reply: ", claudResult);
 
         return {
             pseudocode,

@@ -1,6 +1,8 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
-import { codeToPseudocode, PseudocodeResult } from './claudeApi';
+import { codeToPseudocode, PseudocodeResult,
+    findPseudoBySrc, findSrcByPseudo
+ } from './claudeApi';
 import * as dotenv from 'dotenv';
 import { parsePythonWithAST } from './pythonAnalyzer';
 import { FlowchartNodeClickEventHandler, clearEditor, handlePseudocodeLineClick,
@@ -19,15 +21,17 @@ let pseudocodeHistory: string[] = [];
 // @Param:
 //    lineToNodeMap                : map 'lineno-of-code : number' to 'nodeId: string'
 //    currentLineMapping           : map 'lineno-of-code : number' to 'lineno-of-pseudocode : number'
-//    codelinenoToPseudocodelineno : map 'lineno-of-code : number' to 'lineno-of-pseudocode : number[]'
 //    pseudocodeToLineMap          : map 'lineno-of-pseudocode : number' to 'lineno-of-code : number'
 //    nodeIdToLine                 : map 'nodeId-of-flowchart-element : string' to 'lineno-of-code : number'
+//    srcLineToPseudoLines         : map 'lineno-of-srccode : number' to 'lineno-of-pseudocode : number[]'
+//    pseudoLineToSrcLines         : map 'lineno-of-pseudocode : number' to 'lineno-of-srccode : number[]'
 export let lineToNodeMap: Map<number, string[]> = new Map();
 let currentLineMapping: Array<{pythonLine: number, pseudocodeLine: number}> = [];
-export const codelinenoToPseudocodelineno: Map<number[], number[]> = new Map();
 export let pseudocodeToLineMap: Map<number, number> = new Map();
 let fullPseudocodeGenerated = false;
 export const nodeIdToLine = new Map<string, number | null>();
+export let srcLineToPseudoLines: Map<number, number[]>;
+export let pseudoLineToSrcLines: Map<number, number[]>;
 
 export function activate(context: vscode.ExtensionContext) {
     const extensionPath = context.extensionPath;
@@ -50,6 +54,7 @@ export function activate(context: vscode.ExtensionContext) {
             if (hasRealChanges) {
                 pseudocodeCache.clear();
                 currentLineMapping = [];
+                srcLineToPseudoLines.clear();
                 fullPseudocodeGenerated = false;
             }
         }
@@ -110,6 +115,8 @@ export function activate(context: vscode.ExtensionContext) {
                     pseudocodeHistory = [];
                     currentLineMapping = [];
                     pseudocodeToLineMap.clear();
+                    srcLineToPseudoLines.clear();
+                    pseudoLineToSrcLines.clear();
                     fullPseudocodeGenerated = false;
                 });
             }
@@ -138,6 +145,8 @@ export function activate(context: vscode.ExtensionContext) {
                             pseudocodeHistory = [];
                             currentLineMapping = [];
                             pseudocodeToLineMap.clear();
+                            srcLineToPseudoLines.clear();
+                            pseudoLineToSrcLines.clear();
                             fullPseudocodeGenerated = false;
                             updateWebviewPseudocode();
                             break;
@@ -159,6 +168,8 @@ export function activate(context: vscode.ExtensionContext) {
         pseudocodeHistory = [];
         currentLineMapping = [];
         pseudocodeToLineMap.clear();
+        srcLineToPseudoLines.clear();
+        pseudoLineToSrcLines.clear();
         fullPseudocodeGenerated = false;
         updateWebviewPseudocode();
         vscode.window.showInformationMessage('Pseudocode history cleared');
@@ -399,10 +410,20 @@ async function convertToPseudocode(isAutoUpdate: boolean = false) {
             currentLineMapping = result.lineMapping;
 
             pseudocodeToLineMap.clear();
-            pseudocodeToLineMap = result.pseudoLineToSrcLines;
             result.lineMapping.forEach(mapping => {
                 pseudocodeToLineMap.set(mapping.pseudocodeLine, mapping.pythonLine);
             });
+            srcLineToPseudoLines = result.srcLineToPseudoLines;
+            pseudoLineToSrcLines = result.pseudoLineToSrcLines;
+            console.log('srcLineToPseudoLines: ');
+            srcLineToPseudoLines.forEach(
+                (value, key) => console.log("key: %d, value: %s", key, value.toString())
+            );
+            console.log('pseudoLineToSrcLines: ');
+            pseudoLineToSrcLines.forEach(
+                (value, key) => console.log("key: %d, value: %s", key, value.toString())
+            );
+
             console.log('Pseudocode to line map created:', Array.from(pseudocodeToLineMap.entries()));
             
             // 設置映射到 WebviewEventHandler

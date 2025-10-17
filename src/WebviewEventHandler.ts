@@ -2,7 +2,14 @@ import * as vscode from 'vscode';
 import { 
 	nodeIdStringIsStartOrEnd, sourceDocUri, currentPanel, 
 	// mapping relation
-	nodeIdToLine, lineToNodeMap, pseudocodeToLineMap
+	nodeIdToLine, lineToNodeMap, pseudocodeToLineMap, pseudoLineToSrcLines
+	// mapping relation
+	// @Param:
+	//    lineToNodeMap                : map 'lineno-of-code : number' to 'nodeId: string'
+	//    pseudocodeToLineMap          : map 'lineno-of-pseudocode : number' to 'lineno-of-code : number'
+	//    nodeIdToLine                 : map 'nodeId-of-flowchart-element : string' to 'lineno-of-code : number'
+	//    srcLineToPseudoLines         : map 'lineno-of-srccode : number' to 'lineno-of-pseudocode : number[]'
+	//    pseudoLineToSrcLines         : map 'lineno-of-pseudocode : number' to 'lineno-of-srccode : number[]'
 } from './extension';
 
 // decoration type (top-level, cache it)
@@ -89,32 +96,51 @@ export async function handlePseudocodeLineClick(
 	
 	// this event do for TextEditor Area
 	// 從映射中找到對應的 Python 行
-	const pythonLine = pseudocodeToLineMap?.get(pseudocodeLine);
+	// const pythonLine = pseudocodeToLineMap?.get(pseudocodeLine);
+	const pythonLines = pseudoLineToSrcLines?.get(pseudocodeLine);
 	
-	if (!pythonLine) {
+	// if (!pythonLine) {
+	// 	console.log('No Python line mapping found for pseudocode line:', pseudocodeLine);
+	// 	clearEditor(editor);
+	// 	clearHighlightInWebviewPanel();
+	// 	return;
+	// }
+
+	if (!pythonLines) {
 		console.log('No Python line mapping found for pseudocode line:', pseudocodeLine);
 		clearEditor(editor);
 		clearHighlightInWebviewPanel();
 		return;
 	}
 	
-	console.log('Mapped to Python line:', pythonLine);
+	// console.log('Mapped to Python line:', pythonLine);
+	console.log('Mapped to Python line:', pythonLines.toString());
+	
+	// // 高亮 Python 編輯器中的對應行
+	// const lineIndex = pythonLine - 1;
+	// const range = new vscode.Range(lineIndex, 0, lineIndex, Number.MAX_SAFE_INTEGER);
+
 	
 	// 高亮 Python 編輯器中的對應行
-	const lineIndex = pythonLine - 1;
-	const range = new vscode.Range(lineIndex, 0, lineIndex, Number.MAX_SAFE_INTEGER);
+	const lineIndexes: number[] = pythonLines;
+	const ranges : vscode.Range[] = [];
+	for(const el of lineIndexes){
+		const tmpRange = new vscode.Range(el, 0, el, Number.MAX_SAFE_INTEGER);
+		ranges.push(tmpRange);
+	}
 	
-	highlightEditor(editor, [range]);
+	// highlightEditor(editor, [range]);
+	highlightEditor(editor, ranges);
 	
 
 
 	// this event do for flowchart Area and Pseudocode Area
 	// 找到對應的 nodes
-	const nodeIds = lineToNodeMap?.get(pythonLine);
+	const nodeIds = lineToNodeMap?.get(pythonLines[0]);
 	console.log('Mapped to nodes:', nodeIds);
 	
 	// // 發送消息到 webview 高亮對應的 flowchart 節點和 pseudocode
-	highlightNodesAndPseudocodeInWebview(nodeIds || [], [pythonLine]);
+	highlightNodesAndPseudocodeInWebview(nodeIds || [], pythonLines);
 }
 
 
