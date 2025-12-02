@@ -1,15 +1,16 @@
-def prime_factors(n: int) -> list[int]:
-    """
-    Returns prime factors of n as a list.
-    """
-    i = 2
-    factors = []
-    while i * i <= n:
-        if n % i:
-            i += 1
-        else:
-            n //= i
-            factors.append(i)
-    if n > 1:
-        factors.append(n)
-    return factors
+def function3(nums: List[int]) -> List[int]:
+    missing = []
+    n = len(nums)
+    for x in range(1, n + 1):
+        found = False
+        for j in range(n):
+            if nums[j] == x:
+                found = True
+                break
+        if not found:
+            missing.append(x)
+    return missing
+
+if __name__ == "__main__":
+    arr = list(map(int, input().split(','))) # input array
+    ans = function3(arr)

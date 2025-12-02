@@ -1,19 +1,12 @@
-def binary_search(sorted_collection: list[int], item: int) -> int:
-    """
-    Pure implementation of a binary search algorithm in Python
-    """
-    if list(sorted_collection) != sorted(sorted_collection):
-        raise ValueError("sorted_collection must be sorted in ascending order")
-    left = 0
-    right = len(sorted_collection) - 1
+def function1(nums: List[int], target: int) -> List[int]:
+    n = len(nums)
+    for i in range(n - 1):
+        for j in range(i + 1, n):
+            if nums[i] + nums[j] == target:
+                return [i, j]
+    return []
 
-    while left <= right:
-        midpoint = left + (right - left) // 2
-        current_item = sorted_collection[midpoint]
-        if current_item == item:
-            return midpoint
-        elif item < current_item:
-            right = midpoint - 1
-        else:
-            left = midpoint + 1
-    return -1
+if __name__ == "__main__":
+    num = int(input())
+    arr = list(map(int, input().split(','))) # input array
+    ans = function1(arr, num)

@@ -1,14 +1,13 @@
-def is_palindrome(s: str) -> bool:
-    """
-    Return True if s is a palindrome otherwise return False.
-    """
+def function2(nums: List[int]) -> List[int]:
+    result = []
+    for i in range(len(nums)):
+        count = 0
+        for j in range(len(nums)):
+            if nums[j] < nums[i]:
+                count += 1
+        result.append(count)
+    return result
 
-    start_i = 0
-    end_i = len(s) - 1
-    while start_i < end_i:
-        if s[start_i] == s[end_i]:
-            start_i += 1
-            end_i -= 1
-        else:
-            return False
-    return True
+if __name__ == "__main__":
+    arr = list(map(int, input().split(','))) # input array
+    ans = function2(arr)
