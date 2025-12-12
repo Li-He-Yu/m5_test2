@@ -1,9 +1,16 @@
-const vscode = acquireVsCodeApi();
-let currentScale = 1;
-let currentHighlightedNodes = [];
-let currentHighlightedPseudocodeLines = [];
-let lineMapping = {};
+/* =========================================================
+ * VS Code Webview – Flowchart Panel
+ * - Mermaid flowchart render + interactions
+ * - Pseudocode render + line selection
+ * - Message bridge with extension (postMessage / onmessage)
+ * Notes:
+ * - This file expects to be loaded with <script ... defer>
+ * ========================================================= */
 
+/* ---------- VS Code API ---------- */
+const vscode = acquireVsCodeApi();
+
+/* ---------- Embedded JSON Data ---------- */
 const nodeOrderJsonTag = document.getElementById('node-order-json');
 let nodeOrder = [];
 try {
@@ -11,6 +18,12 @@ try {
 } catch (_) {
 	nodeOrder = [];
 }
+
+/* ---------- A) Global state  ---------- */
+let currentScale = 1;
+let currentHighlightedNodes = [];
+let currentHighlightedPseudocodeLines = [];
+let lineMapping = {};
 
 let zoomTimeout = null;
 let dragTimeout = null;
@@ -20,6 +33,10 @@ let startX = 0;
 let startY = 0;
 let scrollLeft = 0;
 let scrollTop = 0;
+
+
+
+/* ---------- B) Mermaid init & layout helpers ---------- */
 
 function initMermaidSafe() {
 	if (typeof mermaid === 'undefined') {
@@ -44,8 +61,6 @@ function initMermaidSafe() {
 	});
 }
 
-document.addEventListener('DOMContentLoaded', initMermaidSafe);
-
 function centerFlowchart() {
 	const container = document.getElementById('mermaid-container');
 	const wrapper = document.getElementById('mermaid-wrapper');
@@ -67,18 +82,21 @@ function centerFlowchart() {
 	}
 }
 
+document.addEventListener('DOMContentLoaded', initMermaidSafe);
+
+
+
+/* ---------- C) DOM References ---------- */
 const mermaidContainer = document.getElementById('mermaid-container');
 const zoomIndicator = document.getElementById('zoomIndicator');
 const dragIndicator = document.getElementById('dragIndicator');
 
-function clearPseudocodeHistory() {
-	vscode.postMessage({ command: 'webview.clearPseudocodeHistory' });
-	const pseudocodeContent = document.getElementById('pseudocode-content');
-	if (pseudocodeContent) {
-		pseudocodeContent.innerHTML = '';
-	}
-}
 
+
+/* ---------- D) Flowchart interactions (click/drag/zoom) ---------- */
+
+// D) Flowchart interactions
+// 		-- click related
 mermaidContainer.addEventListener('click', (e) => {
 	const el = e.target.closest('.node');
 	if (!el) return;
@@ -91,6 +109,23 @@ mermaidContainer.addEventListener('click', (e) => {
 
 	vscode.postMessage({ command: 'webview.FlowchartNodeClicked', nodeId });
 	highlightNodes([nodeId]);
+});
+
+// D) Flowchart interactions
+// 		-- drag related
+
+mermaidContainer.addEventListener('mousemove', (e) => {
+	if (!isDragging) return;
+	
+	e.preventDefault();
+	
+	const x = e.pageX - mermaidContainer.offsetLeft;
+	const y = e.pageY - mermaidContainer.offsetTop;
+	const walkX = (x - startX) * 1.5;
+	const walkY = (y - startY) * 1.5;
+	
+	mermaidContainer.scrollLeft = scrollLeft - walkX;
+	mermaidContainer.scrollTop = scrollTop - walkY;
 });
 
 mermaidContainer.addEventListener('mousedown', (e) => {
@@ -113,20 +148,6 @@ mermaidContainer.addEventListener('mousedown', (e) => {
 	}
 	
 	e.preventDefault();
-});
-
-mermaidContainer.addEventListener('mousemove', (e) => {
-	if (!isDragging) return;
-	
-	e.preventDefault();
-	
-	const x = e.pageX - mermaidContainer.offsetLeft;
-	const y = e.pageY - mermaidContainer.offsetTop;
-	const walkX = (x - startX) * 1.5;
-	const walkY = (y - startY) * 1.5;
-	
-	mermaidContainer.scrollLeft = scrollLeft - walkX;
-	mermaidContainer.scrollTop = scrollTop - walkY;
 });
 
 mermaidContainer.addEventListener('mouseup', () => {
@@ -156,6 +177,11 @@ mermaidContainer.addEventListener('mouseleave', () => {
 		}, 1000);
 	}
 });
+
+
+// D) Flowchart interactions
+// 		-- zoom related
+
 
 mermaidContainer.addEventListener('wheel', (e) => {
 if (e.ctrlKey || e.metaKey) {
@@ -200,6 +226,30 @@ document.addEventListener('wheel', (e) => {
 	}
 }, { passive: false });
 
+function resetView() {
+	currentScale = 1;
+	document.querySelector('.mermaid').style.transform = 'scale(1)';
+	centerFlowchart();
+	
+	zoomIndicator.textContent = '100%';
+	zoomIndicator.classList.add('visible');
+	
+	if (zoomTimeout) {
+		clearTimeout(zoomTimeout);
+	}
+	
+	zoomTimeout = setTimeout(() => {
+		zoomIndicator.classList.remove('visible');
+	}, 2000);
+}
+
+function resetZoom() {
+	resetView();
+}
+
+
+
+/* ---------- E) Highlight & mapping utilities ---------- */
 
 // 因為mermaid生成的格式是"flowchart-node_10-123"
 // 但我只要"node_10" 所以會需要做一些處理
@@ -222,6 +272,26 @@ function findNodeElement(nodeId) {
 		}
 	}
 	return null;
+}
+
+function clearHighlight() {
+	currentHighlightedNodes.forEach(el => {
+		el.classList.remove('highlighted');
+	});
+	currentHighlightedNodes = [];
+}
+
+function clearPseudocodeHighlight() {
+	currentHighlightedPseudocodeLines.forEach(el => {
+		el.classList.remove('highlighted');
+	});
+	currentHighlightedPseudocodeLines = [];
+}
+
+function clearHighlightAndEditor() {
+	clearHighlight();
+	clearPseudocodeHighlight();
+	vscode.postMessage({ command: 'webview.requestClearEditor' });
 }
 
 function highlightNodes(nodeIds) {
@@ -307,25 +377,9 @@ function highlightPseudocodeLines(pythonLineNumbers) {
 	}
 }
 
-function clearPseudocodeHighlight() {
-	currentHighlightedPseudocodeLines.forEach(el => {
-		el.classList.remove('highlighted');
-	});
-	currentHighlightedPseudocodeLines = [];
-}
 
-function clearHighlight() {
-	currentHighlightedNodes.forEach(el => {
-		el.classList.remove('highlighted');
-	});
-	currentHighlightedNodes = [];
-}
 
-function clearHighlightAndEditor() {
-	clearHighlight();
-	clearPseudocodeHighlight();
-	vscode.postMessage({ command: 'webview.requestClearEditor' });
-}
+/* ---------- F) Pseudocode rendering & interactions ---------- */
 
 function escapeHtml(text) {
 	const div = document.createElement('div');
@@ -334,8 +388,6 @@ function escapeHtml(text) {
 }
 
 // 在 updatePseudocodeDisplay 函數中修改
-
-
 function updatePseudocodeDisplay(pseudocode) {
 	const pseudocodeContent = document.getElementById('pseudocode-content');
 	if (!pseudocodeContent) return;
@@ -453,6 +505,18 @@ function updatePseudocodeDisplay(pseudocode) {
 	console.log('Pseudocode display updated with', lines.length, 'lines');
 }
 
+function clearPseudocodeHistory() {
+	vscode.postMessage({ command: 'webview.clearPseudocodeHistory' });
+	const pseudocodeContent = document.getElementById('pseudocode-content');
+	if (pseudocodeContent) {
+		pseudocodeContent.innerHTML = '';
+	}
+}
+
+
+
+/* ---------- G) Message bridge (from extension -> webview) ---------- */
+
 // message = {
 //     command: 'highlightNodesAndPseudocode',
 //     nodeIds: ['node_5', 'node_6'],      
@@ -488,24 +552,3 @@ window.addEventListener('message', event => {
 			break;
 	}
 });
-
-function resetView() {
-	currentScale = 1;
-	document.querySelector('.mermaid').style.transform = 'scale(1)';
-	centerFlowchart();
-	
-	zoomIndicator.textContent = '100%';
-	zoomIndicator.classList.add('visible');
-	
-	if (zoomTimeout) {
-		clearTimeout(zoomTimeout);
-	}
-	
-	zoomTimeout = setTimeout(() => {
-		zoomIndicator.classList.remove('visible');
-	}, 2000);
-}
-
-function resetZoom() {
-	resetView();
-}
